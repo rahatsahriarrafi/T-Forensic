@@ -1,0 +1,12 @@
+{
+  "name": "deep_lab",
+  "description": "Lab with virtual-write cache + full ingest + timeline export + correlate",
+  "steps": [
+    {"type": "lab_enable", "virtual_write": true},
+    {"type": "ingest"},
+    {"type": "plugin", "plugin": "hash_sweep", "params": {"limit": 100}},
+    {"type": "plugin", "plugin": "timeline_export"},
+    {"type": "plugin", "plugin": "strings_hunt"},
+    {"type": "plugin", "plugin": "correlate"}
+  ]
+}

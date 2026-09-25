@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="T Forensic">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#050506"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f4f6f8"/>
+      <stop offset="45%" stop-color="#9aa3ad"/>
+      <stop offset="100%" stop-color="#e8ecf0"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="url(#bg)"/>
+  <circle cx="128" cy="120" r="88" fill="none" stroke="#2dd4bf" stroke-opacity="0.85" stroke-width="4"/>
+  <circle cx="128" cy="120" r="60" fill="none" stroke="#d7dde6" stroke-opacity="0.35" stroke-width="2.5"/>
+  <text x="128" y="138" text-anchor="middle"
+        font-family="Segoe UI, Helvetica Neue, Arial, sans-serif"
+        font-size="72" font-weight="800" letter-spacing="-2"
+        fill="url(#metal)">TFF</text>
+</svg>

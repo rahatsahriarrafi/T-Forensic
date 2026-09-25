@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team Forensic Framework · TFF</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Orbitron:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./node_modules/xterm/css/xterm.css">
+<style>
+  :root {
+    --bg: #070b12;
+    --border: #243247;
+    --accent: #00e5c0;
+    --muted: #8fa0b8;
+    --text: #f0f6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text);
+    font-family: "IBM Plex Sans", "Segoe UI", Helvetica Neue, Arial, sans-serif; }
+  body { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .bar {
+    display: flex; gap: 12px; align-items: center;
+    padding: 8px 14px; border-bottom: 1px solid var(--border);
+    background: #11151c;
+    flex: 0 0 auto;
+  }
+  .bar .logo {
+    height: 40px; width: auto; background: #050506; border-radius: 8px; padding: 0;
+  }
+  .bar .title { color: var(--text); font-size: 14px; letter-spacing: .2px; font-weight: 650; }
+  .bar .sub { color: var(--muted); font-size: 11px; }
+  .bar button, #welcome button {
+    background: #1a2030; color: var(--text); border: 1px solid var(--border);
+    padding: 6px 10px; border-radius: 6px; cursor: pointer; font: inherit;
+  }
+  .bar button.primary, #welcome button.primary {
+    background: rgba(45, 212, 191, 0.12); border-color: var(--accent); color: var(--accent);
+    font-weight: 600;
+  }
+  .bar .meta { color: var(--muted); font-size: 12px; margin-left: auto; }
+  #content { flex: 1 1 auto; min-height: 0; position: relative; }
+  #viewer { border: 0; width: 100%; height: 100%; background: var(--bg); position: absolute; inset: 0; }
+  #welcome {
+    display: grid; place-items: center; height: 100%; text-align: center; padding: 2rem;
+  }
+  #welcome .hero {
+    height: 120px; width: auto; margin: 0 auto 1rem;
+    background: #050506; border-radius: 14px; padding: 0;
+    box-shadow: 0 0 0 1px rgba(45,212,191,.25), 0 12px 40px rgba(0,0,0,.45);
+  }
+  #welcome h1 { margin: 0 0 0.35rem; color: var(--text); font-size: 20px; letter-spacing: .3px; }
+  #welcome .byline { color: var(--accent); font-size: 12px; margin-bottom: 0.75rem; letter-spacing: .08em; text-transform: uppercase; }
+  #welcome p { color: var(--muted); max-width: 36rem; margin: 0.5rem auto 1.25rem; line-height: 1.5; }
+  .accept-list {
+    text-align: left; max-width: 28rem; margin: 0 auto 1.25rem;
+    border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem 1rem;
+    background: #152032;
+  }
+  .accept-title { color: var(--accent); font-size: 11px; margin-bottom: 0.4rem; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
+  .accept-list ul { margin: 0; padding-left: 1.1rem; color: var(--muted); font-size: 12px; line-height: 1.55; }
+  .accept-list strong { color: var(--text); }
+  #term-wrap {
+    --term-h: 240px;
+    display: none;
+    flex-direction: column;
+    flex: 0 0 var(--term-h);
+    height: var(--term-h);
+    min-height: 120px;
+    max-height: 70vh;
+    background: #0a1018;
+    border-top: none;
+    position: relative;
+    z-index: 20;
+  }
+  #term-wrap.open { display: flex; }
+  #term-resizer {
+    height: 10px;
+    cursor: ns-resize;
+    touch-action: none;
+    background: #121820;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+    position: relative;
+    z-index: 21;
+  }
+  #term-resizer::after {
+    content: "";
+    position: absolute;
+    left: 50%; top: 3px;
+    width: 44px; height: 3px;
+    margin-left: -22px;
+    border-radius: 2px;
+    background: var(--accent);
+    opacity: 0.55;
+    pointer-events: none;
+  }
+  #term-resizer:hover, #term-resizer.dragging {
+    background: #1a2430;
+  }
+  #term-resizer:hover::after, #term-resizer.dragging::after { opacity: 1; }
+  #term-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.3rem 0.65rem; font-size: 0.75rem; color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+    user-select: none;
+    cursor: ns-resize;
+    touch-action: none;
+  }
+  #terminal {
+    flex: 1 1 auto;
+    padding: 4px 6px;
+    min-height: 0;
+    overflow: hidden;
+  }
+  #terminal .xterm { height: 100%; }
+  #terminal .xterm-viewport { overflow-y: auto !important; }
+  #busy {
+    display: none; position: fixed; inset: 0; z-index: 1000;
+    background: rgba(4, 8, 14, .78); backdrop-filter: blur(6px);
+    place-items: center; padding: 1.5rem;
+  }
+  #busy.show { display: grid; }
+  #busy .card {
+    max-width: 28rem; width: 100%;
+    background: #152032; border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.25rem 1.4rem; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  }
+  #busy .spin {
+    width: 28px; height: 28px; border: 3px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .8s linear infinite; margin-bottom: .85rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #busy .btitle { color: var(--accent); font-size: 13px; margin-bottom: .35rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+  #busy .bmsg { color: var(--text); font-size: 13px; line-height: 1.45; }
+  #busy .bhint { color: var(--muted); font-size: 12px; margin-top: .65rem; line-height: 1.4; }
+  #busy .beta {
+    margin-top: .75rem; padding-top: .65rem; border-top: 1px solid var(--border);
+    color: var(--accent); font-size: 12px; letter-spacing: .2px;
+  }
+  #busy .beta .sub { color: var(--muted); font-size: 11px; margin-top: .25rem; }
+  #busy .bprog {
+    margin-top: .85rem;
+  }
+  #busy .bprog-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 12px; margin-bottom: .35rem;
+  }
+  #busy .bprog-pct { color: var(--accent); font-weight: 600; font-size: 14px; }
+  #busy .bprog-label { color: var(--muted); font-size: 11px; }
+  #busy .bprog-track {
+    height: 8px; background: #0a1018; border-radius: 999px; overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  #busy .bprog-fill {
+    height: 100%; width: 0%; background: linear-gradient(90deg, #00b89a, #3db9ff);
+    border-radius: 999px; transition: width .25s ease;
+  }
+  #busy .bprog-fill.indeterminate {
+    width: 35% !important;
+    animation: prog-slide 1.2s ease-in-out infinite;
+  }
+  @keyframes prog-slide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(280%); }
+  }
+  #toast {
+    position: fixed; right: 16px; bottom: 16px; z-index: 1100;
+    display: flex; flex-direction: column; gap: 8px; max-width: 26rem; pointer-events: none;
+  }
+  .toast {
+    pointer-events: auto; background: #152032; border: 1px solid var(--border);
+    border-left: 3px solid var(--accent); border-radius: 8px; padding: .75rem .9rem;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4); animation: toast-in .2s ease;
+  }
+  .toast.err { border-left-color: #ff6b7a; }
+  .toast .tt { color: var(--accent); font-size: 12px; margin-bottom: .2rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+  .toast.err .tt { color: #ff6b7a; }
+  .toast .tm { color: var(--text); font-size: 12px; line-height: 1.4; }
+  .toast .ts { color: var(--muted); font-size: 11px; margin-top: .4rem; line-height: 1.35; }
+  .toast .tx { float: right; background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 14px; }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body>
+  <div id="busy" aria-live="polite" aria-busy="true">
+    <div class="card">
+      <div class="spin" aria-hidden="true"></div>
+      <div class="btitle" id="busy-title">Working…</div>
+      <div class="bmsg" id="busy-msg">Please wait</div>
+      <div class="bhint" id="busy-hint"></div>
+      <div class="bprog" id="busy-prog">
+        <div class="bprog-head">
+          <span class="bprog-label">Loaded</span>
+          <span class="bprog-pct" id="busy-pct">0%</span>
+        </div>
+        <div class="bprog-track"><div class="bprog-fill indeterminate" id="busy-fill"></div></div>
+      </div>
+      <div class="beta" id="busy-eta" hidden>
+        <div id="busy-eta-main">Est. —</div>
+        <div class="sub" id="busy-eta-sub"></div>
+      </div>
+    </div>
+  </div>
+  <div id="toast" aria-live="assertive"></div>
+  <div class="bar">
+    <img class="logo" src="./assets/tff-logo.svg" alt="TFF">
+    <div>
+      <div class="title">Team Forensic Framework</div>
+      <div class="sub">TFF · by Team NullX · <span id="shell-version">v0.3.0</span></div>
+    </div>
+    <button class="primary" id="btn-open">Open image…</button>
+    <button id="btn-term">Terminal</button>
+    <button id="btn-browser" disabled>Open in browser</button>
+    <span class="meta" id="meta">No case loaded</span>
+  </div>
+
+  <div id="content">
+    <div id="welcome">
+      <div>
+        <img class="hero" src="./assets/tff-mark.svg" alt="Team Forensic Framework">
+        <h1>Team Forensic Framework</h1>
+        <div class="byline">TFF · by Team NullX · v0.3.0</div>
+        <p>AD1 + disk/OVA + PCAP analysis framework. Evidence images stay immutable; analysis writes go to case lab/, virtual-write cache, and exports.</p>
+        <div class="accept-list">
+          <div class="accept-title">Accepted for analysis</div>
+          <ul>
+            <li><strong>AD1</strong> — .ad1</li>
+            <li><strong>EWF</strong> — .E01 .Ex01 .ewf .s01</li>
+            <li><strong>OVA</strong> — .ova (extract + mount)</li>
+            <li><strong>Raw/DD</strong> — .dd .raw .img .bin</li>
+            <li><strong>AFF</strong> — .aff .aaff</li>
+            <li><strong>Virtual</strong> — .vdi .qcow2 .vmdk .vhd</li>
+            <li><strong>Network</strong> — .pcap .pcapng .cap .dmp .pkt .snoop .erf …</li>
+          </ul>
+        </div>
+        <button class="primary" id="btn-open-2">Open forensic image</button>
+      </div>
+    </div>
+    <iframe id="viewer" hidden></iframe>
+  </div>
+
+  <div id="term-wrap">
+    <div id="term-resizer" title="Drag to resize terminal"></div>
+    <div id="term-head">
+      <span>Session terminal — drag here to resize · <code>tfor-here</code> · <code>tfor-parts</code> · <code>cdmount</code></span>
+      <span style="display:flex;gap:8px;align-items:center">
+        <button type="button" id="btn-term-sync" title="Re-read mounts from current case" style="background:transparent;border:0;color:var(--accent);cursor:pointer;font:inherit;font-size:0.75rem">Sync</button>
+        <button type="button" id="btn-term-close" style="background:transparent;border:0;color:var(--muted);cursor:pointer">Hide</button>
+      </span>
+    </div>
+    <div id="terminal"></div>
+  </div>
+
+  <script src="./shell.js"></script>
+</body>
+</html>

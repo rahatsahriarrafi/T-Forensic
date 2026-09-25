@@ -1,0 +1,11 @@
+{
+  "name": "quick_triage",
+  "description": "Enable lab, run keyword/artifact ingest modules, strings hunt, correlate",
+  "steps": [
+    {"type": "lab_enable", "virtual_write": false},
+    {"type": "ingest", "modules": ["artifacts", "web", "registry", "lnk_prefetch", "keyword"]},
+    {"type": "plugin", "plugin": "strings_hunt"},
+    {"type": "plugin", "plugin": "correlate"},
+    {"type": "note", "body": "quick_triage playbook completed"}
+  ]
+}

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tforensic"
+version = "0.1.0"
+description = "T Forensic — AD1-first local forensic viewer (CLI + API)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "T Forensic" }]
+dependencies = []
+
+[project.scripts]
+tforensic = "tforensic.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tforensic*"]

@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Unified friendly accessors: tfor-here, tfor-mount, tfor-device, tfor-parts, tfor-fls, tfor-icat, tfor-export
+set -euo pipefail
+name="$(basename "$0")"
+cmd="$name"
+# allow: tfor-here parts → also works if invoked as tfor-here with subcommand
+if [ "$name" = "tfor-here" ] && [ "${1:-}" != "" ] && [[ "${1:-}" != -* ]]; then
+  case "$1" in
+    here|mount|device|parts|fls|icat|export|cd-mount|cd-export) cmd="tfor-$1"; shift ;;
+  esac
+fi
+cmd="${cmd#tfor-}"
+
+case "$cmd" in
+  here)
+    echo "TFOR_SHELL=${TFOR_SHELL:-}"
+    echo "TFOR_MOUNT=${TFOR_MOUNT:-}"
+    echo "TFOR_DEVICE=${TFOR_DEVICE:-}"
+    echo "TFOR_EXPORT=${TFOR_EXPORT:-}"
+    echo "TFOR_LAB=${TFOR_LAB:-}"
+    echo "TFOR_IMAGE=${TFOR_IMAGE:-}"
+    if [ -n "${TFOR_SHELL:-}" ] && [ -d "$TFOR_SHELL" ]; then
+      echo "---"
+      ls -la "$TFOR_SHELL"
+    fi
+    ;;
+  mount)
+    target="${TFOR_MOUNT:-}"
+    if [ -z "$target" ] && [ -n "${TFOR_SHELL:-}" ]; then target="$TFOR_SHELL/mount"; fi
+    if [ -z "$target" ] || [ ! -e "$target" ]; then
+      echo "No mount path. Open a disk/OVA image in T Forensic first." >&2
+      exit 1
+    fi
+    echo "$target"
+    ;;
+  device)
+    if [ -z "${TFOR_DEVICE:-}" ]; then
+      echo "No TFOR_DEVICE (disk/OVA mount). For AD1 use the Tree tab / export." >&2
+      exit 1
+    fi
+    echo "$TFOR_DEVICE"
+    ;;
+  parts)
+    if [ -z "${TFOR_DEVICE:-}" ]; then echo "No TFOR_DEVICE" >&2; exit 1; fi
+    exec mmls "$TFOR_DEVICE" "$@"
+    ;;
+  fls)
+    if [ -z "${TFOR_DEVICE:-}" ]; then echo "No TFOR_DEVICE" >&2; exit 1; fi
+    exec fls "$TFOR_DEVICE" "$@"
+    ;;
+  icat)
+    if [ -z "${TFOR_DEVICE:-}" ]; then echo "No TFOR_DEVICE" >&2; exit 1; fi
+    exec icat "$TFOR_DEVICE" "$@"
+    ;;
+  export)
+    target="${TFOR_EXPORT:-}"
+    if [ -z "$target" ] && [ -n "${TFOR_SHELL:-}" ]; then target="$TFOR_SHELL/export"; fi
+    echo "${target:-}"
+    ;;
+  *)
+    echo "T Forensic shell helpers: here|mount|device|parts|fls|icat|export" >&2
+    exit 1
+    ;;
+esac

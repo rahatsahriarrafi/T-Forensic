@@ -1,0 +1,35 @@
+# Evidence & secrets
+*.ad1
+*.E01
+*.e01
+*.raw
+*.dd
+*.aff
+.env
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+
+# Node / Electron
+desktop/node_modules/
+desktop/dist/
+npm-debug.log*
+
+# Session / temp
+.tforensic/
+*.session.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+.pytest_cache/

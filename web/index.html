@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team Forensic Framework · TFF</title>
+<link rel="icon" href="/static/brand/tff-logo.svg?v=tff3" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Orbitron:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css?v=tff4">
+</head>
+<body class="gui-dashboard">
+<header>
+  <a class="brand" href="#" title="Team Forensic Framework — by Team NullX">
+    <img class="logo" src="/static/brand/tff-mark.svg?v=tff5" alt="TFF">
+  </a>
+    <div class="brand-text">
+    <h1>Team Forensic Framework</h1>
+    <div class="brand-sub">TFF · by Team NullX · Analyst GUI · <span id="app-version">v…</span></div>
+  </div>
+  <div id="info" class="info"></div>
+  <div id="work-status" class="work-status" hidden aria-live="polite">
+    <span class="work-spin" aria-hidden="true"></span>
+    <span id="work-status-text">Working…</span>
+  </div>
+  <input id="search" type="search" placeholder="Search filenames…" autocomplete="off">
+</header>
+
+<main>
+  <aside id="sidebar">
+    <div class="tabs">
+      <button class="tab active" data-pane="tree">Tree</button>
+      <button class="tab" data-pane="findings">Findings</button>
+      <button class="tab" data-pane="case">Case</button>
+      <button class="tab" data-pane="charts">Charts</button>
+      <button class="tab" data-pane="lab">Lab</button>
+      <button class="tab" data-pane="timeline">Timeline</button>
+      <button class="tab" data-pane="csearch">Search</button>
+      <button class="tab" data-pane="disk">Disk</button>
+      <button class="tab" data-pane="network">Network</button>
+      <button class="tab" data-pane="formats">Formats</button>
+    </div>
+    <div id="tree" class="pane active"></div>
+    <div id="findings" class="pane"></div>
+    <div id="case" class="pane">
+      <div class="case-panel" id="case-panel">
+        <div class="disk-actions">
+          <button id="case-create" class="disk-btn">New case</button>
+          <button id="case-refresh" class="disk-btn secondary">Refresh</button>
+        </div>
+        <label class="disk-label">Case name
+          <input id="case-name" type="text" placeholder="Case name">
+        </label>
+        <label class="disk-label">Examiner
+          <input id="case-examiner" type="text" placeholder="Analyst name">
+        </label>
+        <div id="case-list" class="disk-list"></div>
+        <div id="case-info" class="disk-list muted">No case open</div>
+        <label class="disk-label">Add evidence path
+          <input id="case-ev-path" type="text" placeholder="/path/to/image.ad1 or .E01">
+        </label>
+        <div class="disk-actions">
+          <button id="case-add" class="disk-btn">Add evidence</button>
+          <button id="case-ingest" class="disk-btn secondary">Ingest</button>
+        </div>
+        <div id="case-jobs" class="disk-list"></div>
+        <label class="disk-label">Tag file id
+          <input id="case-tag-fid" type="number" placeholder="file id">
+        </label>
+        <label class="disk-label">Tag
+          <input id="case-tag" type="text" placeholder="notable">
+        </label>
+        <div class="disk-actions">
+          <button id="case-tag-btn" class="disk-btn secondary">Add tag</button>
+          <button id="case-note-btn" class="disk-btn secondary">Add note</button>
+        </div>
+        <label class="disk-label">Note
+          <input id="case-note" type="text" placeholder="Investigation note…">
+        </label>
+        <label class="disk-label">Hash set import (one hash/line)
+          <textarea id="case-hashes" rows="3" placeholder="md5 or sha1 hashes…"></textarea>
+        </label>
+        <div class="disk-actions">
+          <button id="case-hash-btn" class="disk-btn secondary">Import hashes</button>
+          <button id="case-report-btn" class="disk-btn">HTML report</button>
+        </div>
+        <div class="disk-actions">
+          <button id="case-verify-btn" class="disk-btn secondary">Verify evidence</button>
+          <button id="case-export-btn" class="disk-btn secondary">Export zip</button>
+        </div>
+        <div id="case-custody" class="disk-list"></div>
+      </div>
+    </div>
+    <div id="charts" class="pane">
+      <div class="case-panel charts-panel">
+        <div class="disk-actions">
+          <button id="charts-refresh" class="disk-btn secondary">Refresh charts</button>
+        </div>
+        <div id="charts-metrics" class="chart-metrics"></div>
+        <div id="charts-side" class="charts-side muted">Open a case and run ingest to populate charts.</div>
+      </div>
+    </div>
+    <div id="lab" class="pane">
+      <div class="case-panel">
+        <p class="muted" style="margin:0 0 8px;line-height:1.4">
+          Evidence images stay <strong>immutable</strong>. Lab is the writable sandbox
+          (working copies, plugin output, optional xmount virtual-write cache).
+        </p>
+        <div id="lab-status" class="disk-list muted">Lab status…</div>
+        <div class="disk-actions">
+          <button id="lab-enable" class="disk-btn">Enable lab</button>
+          <button id="lab-vw" class="disk-btn secondary">Enable + virtual-write</button>
+          <button id="lab-refresh" class="disk-btn secondary">Refresh</button>
+        </div>
+        <div class="muted" style="margin:8px 0 4px">Plugins</div>
+        <div id="lab-plugins" class="disk-list"></div>
+        <div class="disk-actions">
+          <button id="lab-run-plugin" class="disk-btn">Run selected plugin</button>
+        </div>
+        <select id="lab-plugin-sel" style="width:100%;margin:4px 0;background:#141210;color:#e6dfd4;border:1px solid #4a4338;padding:6px;border-radius:6px"></select>
+        <div class="muted" style="margin:8px 0 4px">Playbooks</div>
+        <select id="lab-pb-sel" style="width:100%;margin:4px 0;background:#141210;color:#e6dfd4;border:1px solid #4a4338;padding:6px;border-radius:6px"></select>
+        <div class="disk-actions">
+          <button id="lab-run-pb" class="disk-btn">Run playbook</button>
+        </div>
+        <div id="lab-out" class="disk-list"></div>
+      </div>
+    </div>
+    <div id="timeline" class="pane">
+      <div class="case-panel">
+        <div class="disk-actions">
+          <button id="tl-refresh" class="disk-btn secondary">Refresh timeline</button>
+        </div>
+        <div id="tl-list" class="disk-list"><pre class="muted">Open a case and run ingest…</pre></div>
+      </div>
+    </div>
+    <div id="csearch" class="pane">
+      <div class="case-panel">
+        <label class="disk-label">Case search
+          <input id="case-q" type="search" placeholder="filename or keyword…">
+        </label>
+        <button id="case-q-btn" class="disk-btn">Search</button>
+        <div id="case-q-results" class="disk-list"></div>
+      </div>
+    </div>
+    <div id="disk" class="pane">
+      <div class="disk-panel">
+        <div class="disk-status muted" id="xm-status">Checking xmount…</div>
+        <label class="disk-label">Image path
+          <input id="xm-image" type="text" placeholder="/path/to/evidence.E01">
+        </label>
+        <div class="disk-row">
+          <label>In
+            <select id="xm-in">
+              <option value="">auto</option>
+              <option>ewf</option><option>raw</option><option>dd</option>
+              <option>vdi</option><option>qcow2</option><option>aff</option><option>aewf</option>
+            </select>
+          </label>
+          <label>Out
+            <select id="xm-out">
+              <option>raw</option><option>vdi</option><option>vhd</option>
+              <option>vmdk</option><option>dmg</option>
+            </select>
+          </label>
+          <label>Morph
+            <select id="xm-morph">
+              <option>combine</option><option>unallocated</option><option>raid0</option>
+            </select>
+          </label>
+        </div>
+        <label class="disk-label">Cache (optional virtual-write)
+          <input id="xm-cache" type="text" placeholder="/tmp/tforensic.cache">
+        </label>
+        <div class="disk-actions">
+          <button id="xm-mount" class="disk-btn">Mount</button>
+          <button id="xm-refresh" class="disk-btn secondary">Refresh</button>
+        </div>
+        <div class="disk-eta muted" id="xm-eta">Enter a path to see an open-time estimate.</div>
+        <div id="xm-mounts" class="disk-list"></div>
+        <div id="xm-parts" class="disk-list"></div>
+        <div id="xm-fls" class="disk-list"></div>
+      </div>
+    </div>
+    <div id="network" class="pane">
+      <div class="disk-panel">
+        <div class="disk-status muted" id="pcap-status">Checking tshark…</div>
+        <label class="disk-label">PCAP / packet capture path
+          <input id="pcap-path" type="text" placeholder="/path/to/capture.pcap (.pcapng .cap .dmp .pkt …)">
+        </label>
+        <label class="disk-label">Display filter (Wireshark syntax)
+          <input id="pcap-filter" type="text" placeholder="http || dns || tcp.port==443">
+        </label>
+        <div class="disk-actions">
+          <button id="pcap-open" class="disk-btn">Open</button>
+          <button id="pcap-apply" class="disk-btn secondary">Apply filter</button>
+          <button id="pcap-stats" class="disk-btn secondary">Stats</button>
+          <button id="pcap-close" class="disk-btn secondary">Close</button>
+        </div>
+        <div id="pcap-meta" class="disk-list muted">Open any packet capture: .pcap .pcapng .cap .dmp .pkt .snoop .erf …</div>
+        <div id="pcap-packets" class="disk-list pcap-packets"></div>
+      </div>
+    </div>
+    <div id="formats" class="pane">
+      <div class="formats-panel" id="formats-list">
+        <pre class="muted">Loading accepted formats…</pre>
+      </div>
+    </div>
+  </aside>
+
+  <section id="detail">
+    <div id="detail-head" class="detail-head">
+      <span class="muted">Select a file…</span>
+    </div>
+    <div class="detail-tabs">
+      <button class="dtab active" data-view="text">Preview</button>
+      <button class="dtab" data-view="hex">Hex</button>
+      <button class="dtab" data-view="meta">Metadata</button>
+      <button class="dtab" data-view="hash">Hashes</button>
+      <button id="export-btn" class="dtab dl" hidden>Export</button>
+      <a id="dl" class="dtab dl" href="#" hidden>⬇ Download</a>
+    </div>
+    <div id="detail-body"><pre class="muted">Nothing loaded.</pre></div>
+  </section>
+</main>
+
+<footer>
+  <img class="logo-sm" src="/static/brand/tff-logo.svg?v=tff4" alt="">
+  <span><strong>Team Forensic Framework</strong> (TFF) — by <strong>Team NullX</strong></span>
+  <span class="tag" id="footer-version">v…</span>
+  <span class="tag">evidence immutable · lab is writable</span>
+  <span id="session-pill" class="gh"></span>
+</footer>
+
+<div id="busy" aria-live="polite">
+  <div class="busy-card">
+    <div class="busy-spin" aria-hidden="true"></div>
+    <div class="busy-title" id="busy-title">Working…</div>
+    <div class="busy-msg" id="busy-msg">Please wait</div>
+    <div class="busy-hint" id="busy-hint"></div>
+    <div class="busy-prog" id="busy-prog">
+      <div class="busy-prog-head">
+        <span class="busy-prog-label">Loaded</span>
+        <span class="busy-prog-pct" id="busy-pct">0%</span>
+      </div>
+      <div class="busy-prog-track"><div class="busy-prog-fill indeterminate" id="busy-fill"></div></div>
+    </div>
+    <div class="busy-eta" id="busy-eta" hidden>
+      <div id="busy-eta-main">Est. —</div>
+      <div class="busy-eta-sub" id="busy-eta-sub"></div>
+    </div>
+  </div>
+</div>
+<div id="toast" aria-live="assertive"></div>
+
+<script src="/static/app.js?v=tff4"></script>
+</body>
+</html>
