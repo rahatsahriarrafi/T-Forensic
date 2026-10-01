@@ -1,68 +1,68 @@
-# Packaging T Forensic (Linux)
+# Packaging / install — Team Forensic Framework (TFF)
+
+## Fast path (GitHub clone → same desktop app)
+
+```bash
+git clone https://github.com/rahatsahriarrafi/T-Forensic.git
+cd T-Forensic
+./install.sh
+```
+
+This will:
+
+1. `pip install -r requirements.txt` (**required** — TFF will not start without it)
+2. `sudo apt install …` packages from `requirements-system.txt` (skip with `TFF_SKIP_APT=1`)
+3. `npm install` in `desktop/`
+4. Register **T Forensic** in your application menu (`~/.local/share/applications/`)
+5. Symlink `tforensic` / `tforensic-desktop` into `~/.local/bin`
+
+Then open **T Forensic** from the app list (or run `tforensic-desktop`).
+
+Re-install / refresh the menu entry only:
+
+```bash
+./scripts/install-desktop-launcher.sh
+```
 
 ## Runtime dependencies
 
-Python packages:
+Python:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-System packages (Debian/Kali/Ubuntu):
+System (Debian/Kali/Ubuntu):
 
 ```bash
-sudo apt install $(grep -v '^#' requirements-system.txt | tr '\n' ' ')
-# or the short set:
-sudo apt install python3 xmount sleuthkit qemu-utils fuse3 tshark \
-  python3-libscca python3-libregf python3-libfwsi libimage-exiftool-perl \
-  john hashcat samdump2
-# optional deep carve
-sudo apt install testdisk   # provides photorec
+sudo apt install $(grep -vE '^\s*(#|$)' requirements-system.txt | tr '\n' ' ')
 ```
 
-Check what’s missing anytime (prints install suggestions):
+Check what’s missing:
 
 ```bash
+export PYTHONPATH="$PWD/engine" PATH="$PWD/scripts:$PATH"
 tforensic deps
-# JSON: tforensic deps --json
-# API:  GET /api/deps
 ```
 
-Ensure `/etc/fuse.conf` has `user_allow_other` uncommented if xmount requires it.
+Ensure `/etc/fuse.conf` has `user_allow_other` uncommented if xmount needs it.
 
-## CLI / engine
-
-```bash
-cd Project_T-Forensic
-export PYTHONPATH="$PWD/engine"
-export PATH="$PWD/scripts:$PATH"
-pip install -e ./engine   # optional
-```
-
-## Desktop (Electron)
+## Packaged AppImage (optional)
 
 ```bash
-./scripts/run-desktop.sh
-# or
 cd desktop && npm install && npm run pack
-# artifacts under desktop/dist/
+# artifacts: desktop/dist/*.AppImage
+# Make executable and run, or install the .desktop from install.sh for the source tree.
+```
+
+## CLI / web only
+
+```bash
+export PYTHONPATH="$PWD/engine" PATH="$PWD/scripts:$PATH"
+tforensic serve
+# http://127.0.0.1:<port>/
 ```
 
 ## Persistent cases
 
 Cases live under `~/.tforensic/cases/<id>/` (override with `TFOR_CASE_ROOT`).
-
-```bash
-tforensic case create "Matter-42" --examiner "A. Analyst"
-tforensic case add /path/to/evidence.ad1 --ingest
-tforensic case report
-tforensic case export
-tforensic case verify
-```
-
-## Headless API (case mode, no image)
-
-```bash
-tforensic serve --port 8000
-# open http://127.0.0.1:8000/ → Case tab
-```

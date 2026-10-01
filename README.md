@@ -66,44 +66,46 @@ In the web/desktop UI, open the **Disk** tab to mount E01/raw/VDI/…, list part
 - **Electron shell** auto-starts the Python engine on loopback, embeds the UI, and offers an in-app terminal
 - Session temp under `/tmp/tforensic-sessions/<id>/` (override with `TFOR_SESSION_ROOT`)
 
-## Quick start (CLI / web — no Electron)
-
-**TFF will not start until `requirements.txt` is installed.**
+## Install (GitHub → desktop app in your app list)
 
 ```bash
-cd Project_T-Forensic
-python3 -m pip install -r requirements.txt   # REQUIRED — app refuses to run without this
-# optional system tools (disk/PCAP/SAM/prefetch/…):
-#   sudo apt install $(grep -v '^#' requirements-system.txt | tr '\n' ' ')
+git clone https://github.com/rahatsahriarrafi/T-Forensic.git
+cd T-Forensic
+./install.sh
+```
+
+After install, open **T Forensic** from your application menu (same desktop app).  
+Or run: `tforensic-desktop` / `./scripts/run-desktop.sh`
+
+**TFF will not start until `requirements.txt` is installed** (`./install.sh` does this).
+
+See [docs/PACKAGING.md](docs/PACKAGING.md) for AppImage packaging and apt options (`TFF_SKIP_APT=1`).
+
+## Quick start (CLI / web — no Electron)
+
+```bash
+cd T-Forensic
+python3 -m pip install -r requirements.txt   # REQUIRED
+# optional: sudo apt install $(grep -vE '^\s*(#|$)' requirements-system.txt | tr '\n' ' ')
 
 export PYTHONPATH="$PWD/engine"
 export PATH="$PWD/scripts:$PATH"
 
-# See what’s missing (always works — even before pip install)
 tforensic deps
-
-# AD1 logical image
 tforensic open /path/to/evidence.ad1
-
-# Disk image (same as xmount — E01/raw/VDI/qcow2/…)
-tforensic open /path/to/disk.E01
 tforensic serve /path/to/disk.dd --port 8000
 ```
 
-The web UI also shows a **continuous missing-tools banner** (`/api/deps`) that
-refreshes every ~45s until optional system packages are installed.
+The web UI shows a **continuous missing-tools banner** (`/api/deps`) until optional system packages are installed.
 
-Optional install as a package:
-
-```bash
-pip install -e ./engine
-```
+Optional: `pip install -e ./engine`
 
 ## Desktop (Electron)
 
 ```bash
+./install.sh                 # recommended — menu entry + deps
+# or just:
 ./scripts/run-desktop.sh
-# File → Open AD1…  (or: npx electron . /path/to/evidence.ad1 from desktop/)
 ```
 
 First run runs `npm install` in `desktop/` (needs Node.js). The app:
@@ -111,13 +113,6 @@ First run runs `npm install` in `desktop/` (needs Node.js). The app:
 1. Spawns `python3 -m tforensic serve` on an ephemeral loopback port
 2. Loads the UI in an iframe
 3. Can open an embedded terminal (`node-pty` + xterm) with `scripts/tforensic` on `PATH`
-
-### Linux package (optional)
-
-```bash
-cd desktop && npm install && npm run pack
-# artifacts under desktop/dist/
-```
 
 ## Tests
 

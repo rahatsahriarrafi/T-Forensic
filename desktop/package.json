@@ -30,7 +30,7 @@
         "dir"
       ],
       "category": "Utility",
-      "icon": "build/icon.png",
+      "icon": "assets/tforensic-app.png",
       "desktop": {
         "Name": "T Forensic",
         "GenericName": "Team Forensic Framework (TFF)",

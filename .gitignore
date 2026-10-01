@@ -15,7 +15,10 @@ __pycache__/
 .eggs/
 dist/
 build/
+!desktop/build/
+!desktop/build/**
 .venv/
+.venv-*/
 venv/
 
 # Node / Electron
