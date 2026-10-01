@@ -93,7 +93,11 @@ echo "Done.  TFF v${OLD_VER} → v${NEW_VER}"
 if [[ "$STASHED" == "1" ]]; then
   echo "note: local changes were stashed — run:  git stash list"
 fi
-echo "  Desktop:  application menu → T Forensic"
+echo "  Desktop:  application menu → T Forensic   (TFF logo)"
 echo "  Or:       tforensic-desktop"
 echo "  Deps:     tforensic deps"
+echo ""
+echo "If the menu icon looks wrong: log out and back in (icon cache)."
+echo "If click does nothing: run  tforensic-desktop  in a terminal, or see"
+echo "  ~/.cache/tforensic/launch.log"
 echo ""

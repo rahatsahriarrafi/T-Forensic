@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 export PYTHONPATH="${ROOT}/engine${PYTHONPATH:+:$PYTHONPATH}"
-export PATH="${ROOT}/scripts:${PATH}"
+export PATH="${HOME}/.local/bin:${ROOT}/scripts:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 
 # Hard gate: requirements.txt must be installed before the app runs.
 if ! python3 -c "
@@ -23,8 +23,19 @@ print('requirements.txt OK', flush=True)
 fi
 
 cd "${ROOT}/desktop"
-if [[ ! -d node_modules ]]; then
+ELECTRON_BIN="${ROOT}/desktop/node_modules/.bin/electron"
+if [[ ! -x "$ELECTRON_BIN" ]]; then
   echo "Installing desktop dependencies…"
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "error: npm/node not found — install Node.js, then re-run ./update.sh" >&2
+    exit 4
+  fi
   npm install
 fi
-exec npx electron .
+if [[ ! -x "$ELECTRON_BIN" ]]; then
+  echo "error: Electron binary missing after npm install: $ELECTRON_BIN" >&2
+  exit 4
+fi
+
+# Prefer direct electron binary (more reliable than npx from app-menu PATH).
+exec "$ELECTRON_BIN" "${ROOT}/desktop" "$@"

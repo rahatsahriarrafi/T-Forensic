@@ -28,6 +28,10 @@ tforensic-update
 tforensic update
 ```
 
+After update: open **T Forensic** from the app menu (TFF logo).  
+If the old icon still shows, log out/in once.  
+If a click does nothing, run `tforensic-desktop` in a terminal or check `~/.cache/tforensic/launch.log`.
+
 ## Check missing tools
 
 ```bash
