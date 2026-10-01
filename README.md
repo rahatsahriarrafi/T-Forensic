@@ -6,6 +6,36 @@ with Autopsy-class cases, plugins, playbooks, Network/PCAP, and a writable **lab
 **Evidence images stay immutable.** Analysis writes go to `case/lab/`, xmount
 virtual-write cache, exports, and reports — never the source image.
 
+**Owner:** [rahatsahriarrafi](https://github.com/rahatsahriarrafi) · **Team NullX**
+
+---
+
+## Commands (install / update)
+
+| What | Command |
+|------|---------|
+| **Install** (first time) | `git clone https://github.com/rahatsahriarrafi/T-Forensic.git && cd T-Forensic && ./install.sh` |
+| **Update** (already cloned) | `cd T-Forensic && ./update.sh` |
+| **Desktop app** | Application menu → **T Forensic** · or `tforensic-desktop` |
+| **Check tools** | `tforensic deps` |
+| **Web UI** | `tforensic serve` |
+
+Full copy-paste list: **[COMMANDS.md](COMMANDS.md)** · packaging notes: [docs/PACKAGING.md](docs/PACKAGING.md)
+
+```bash
+# first time
+git clone https://github.com/rahatsahriarrafi/T-Forensic.git
+cd T-Forensic
+./install.sh
+
+# later — one command to newest version
+./update.sh
+```
+
+After install, open **T Forensic** from your app list (same desktop experience).
+
+---
+
 **Why TFF:** Autopsy-depth casework, AD1/OVA-first, scriptable Linux framework.
 
 See [docs/FRAMEWORK.md](docs/FRAMEWORK.md) for plugins / lab / playbooks.
@@ -66,33 +96,11 @@ In the web/desktop UI, open the **Disk** tab to mount E01/raw/VDI/…, list part
 - **Electron shell** auto-starts the Python engine on loopback, embeds the UI, and offers an in-app terminal
 - Session temp under `/tmp/tforensic-sessions/<id>/` (override with `TFOR_SESSION_ROOT`)
 
-## Install (GitHub → desktop app in your app list)
+## More install detail
 
-```bash
-git clone https://github.com/rahatsahriarrafi/T-Forensic.git
-cd T-Forensic
-./install.sh
-```
-
-After install, open **T Forensic** from your application menu (same desktop app).  
-Or run: `tforensic-desktop` / `./scripts/run-desktop.sh`
-
-### Update to the newest version (one command)
-
-If you already cloned an older copy:
-
-```bash
-cd T-Forensic
-./update.sh
-```
-
-Or (after `./install.sh` once): `tforensic-update`
-
-That pulls from GitHub, refreshes Python/npm deps, and re-registers the app menu entry.
+See the [Commands table at the top](#commands-install--update) and **[COMMANDS.md](COMMANDS.md)**.
 
 **TFF will not start until `requirements.txt` is installed** (`./install.sh` / `./update.sh` do this).
-
-See [docs/PACKAGING.md](docs/PACKAGING.md) for AppImage packaging and apt options (`TFF_SKIP_APT=1`).
 
 ## Quick start (CLI / web — no Electron)
 
