@@ -18,8 +18,7 @@ fi
 
 # --- Python ---
 echo "==> Python packages (requirements.txt)…"
-python3 -m pip install --user -r "$ROOT/requirements.txt" || \
-  python3 -m pip install -r "$ROOT/requirements.txt"
+"$ROOT/scripts/install-python-reqs.sh" "$ROOT/requirements.txt"
 
 export PYTHONPATH="${ROOT}/engine${PYTHONPATH:+:$PYTHONPATH}"
 export PATH="${ROOT}/scripts:${PATH}"

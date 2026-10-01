@@ -17,6 +17,64 @@ fi
 export PYTHONPATH="${ROOT}/engine${PYTHONPATH:+:$PYTHONPATH}"
 export PATH="${ROOT}/scripts:${PATH}"
 
+# --- Post-pull phase (always uses the *pulled* update.sh via re-exec) ---
+tff_post_pull() {
+  local OLD_VER="${1:-?}"
+  local STASHED="${2:-0}"
+
+  echo "==> Refreshing Python requirements…"
+  if [[ -x "$ROOT/scripts/install-python-reqs.sh" ]]; then
+    "$ROOT/scripts/install-python-reqs.sh" "$ROOT/requirements.txt"
+  else
+    if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+      python3 -m pip install -r "$ROOT/requirements.txt"
+    else
+      python3 -m pip install --user -r "$ROOT/requirements.txt" || \
+        python3 -m pip install -r "$ROOT/requirements.txt"
+    fi
+  fi
+
+  if command -v npm >/dev/null 2>&1 && [[ -f "$ROOT/desktop/package.json" ]]; then
+    echo "==> Refreshing desktop npm deps…"
+    if [[ -x "$ROOT/scripts/desktop-npm-install.sh" ]]; then
+      "$ROOT/scripts/desktop-npm-install.sh"
+    else
+      (cd "$ROOT/desktop" && npm install)
+    fi
+  fi
+
+  if [[ -x "$ROOT/scripts/install-desktop-launcher.sh" ]]; then
+    echo "==> Refreshing application menu entry…"
+    "$ROOT/scripts/install-desktop-launcher.sh"
+  fi
+
+  BIN_DIR="${HOME}/.local/bin"
+  mkdir -p "$BIN_DIR"
+  ln -sfn "$ROOT/scripts/tforensic" "$BIN_DIR/tforensic"
+  ln -sfn "$ROOT/scripts/run-desktop.sh" "$BIN_DIR/tforensic-desktop"
+  ln -sfn "$ROOT/update.sh" "$BIN_DIR/tforensic-update"
+
+  NEW_VER=$(python3 -c "import tforensic; print(tforensic.__version__)" 2>/dev/null || echo "?")
+  echo ""
+  echo "Done.  TFF v${OLD_VER} → v${NEW_VER}"
+  if [[ "$STASHED" == "1" ]]; then
+    echo "note: local changes were stashed — run:  git stash list"
+  fi
+  echo "  Desktop:  application menu → T Forensic   (TFF logo)"
+  echo "  Or:       tforensic-desktop"
+  echo "  Deps:     tforensic deps"
+  echo ""
+  echo "If the menu icon looks wrong: log out and back in (icon cache)."
+  echo "If click does nothing: run  tforensic-desktop  in a terminal, or see"
+  echo "  ~/.cache/tforensic/launch.log"
+  echo ""
+}
+
+if [[ "${TFF_UPDATE_POST_PULL:-}" == "1" ]]; then
+  tff_post_pull "${TFF_UPDATE_OLD_VER:-?}" "${TFF_UPDATE_STASHED:-0}"
+  exit 0
+fi
+
 OLD_VER="?"
 if [[ -f "$ROOT/engine/tforensic/__init__.py" ]]; then
   OLD_VER=$(python3 -c "import tforensic; print(tforensic.__version__)" 2>/dev/null || echo "?")
@@ -24,7 +82,6 @@ fi
 echo "==> TFF update  (current: v${OLD_VER})"
 echo "    repo: $ROOT"
 
-# Prefer origin/main; fall back to current upstream
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 REMOTE=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo "origin/main")
 
@@ -38,12 +95,11 @@ if ! git merge-base --is-ancestor HEAD "$REMOTE" 2>/dev/null && \
   echo "      Resolve manually, or:  git reset --hard $REMOTE" >&2
 fi
 
+STASHED=0
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "warn: you have local changes — stashing before pull…"
   git stash push -u -m "tff-update-$(date +%Y%m%d%H%M%S)" || true
   STASHED=1
-else
-  STASHED=0
 fi
 
 echo "==> Pulling latest…"
@@ -60,44 +116,13 @@ fi
 AFTER=$(git rev-parse HEAD)
 
 if [[ "$BEFORE" == "$AFTER" ]]; then
-  echo "==> Already up to date ($BEFORE)."
+  echo "==> Already up to date ($AFTER)."
 else
   echo "==> Updated $BEFORE → $AFTER"
 fi
 
-echo "==> Refreshing Python requirements…"
-python3 -m pip install --user -r "$ROOT/requirements.txt" || \
-  python3 -m pip install -r "$ROOT/requirements.txt"
-
-if command -v npm >/dev/null 2>&1 && [[ -f "$ROOT/desktop/package.json" ]]; then
-  echo "==> Refreshing desktop npm deps…"
-  "$ROOT/scripts/desktop-npm-install.sh"
-fi
-
-# Re-register app menu (paths may be unchanged, but safe)
-if [[ -x "$ROOT/scripts/install-desktop-launcher.sh" ]]; then
-  echo "==> Refreshing application menu entry…"
-  "$ROOT/scripts/install-desktop-launcher.sh"
-fi
-
-# Keep CLI helper links fresh
-BIN_DIR="${HOME}/.local/bin"
-mkdir -p "$BIN_DIR"
-ln -sfn "$ROOT/scripts/tforensic" "$BIN_DIR/tforensic"
-ln -sfn "$ROOT/scripts/run-desktop.sh" "$BIN_DIR/tforensic-desktop"
-ln -sfn "$ROOT/update.sh" "$BIN_DIR/tforensic-update"
-
-NEW_VER=$(python3 -c "import tforensic; print(tforensic.__version__)" 2>/dev/null || echo "?")
-echo ""
-echo "Done.  TFF v${OLD_VER} → v${NEW_VER}"
-if [[ "$STASHED" == "1" ]]; then
-  echo "note: local changes were stashed — run:  git stash list"
-fi
-echo "  Desktop:  application menu → T Forensic   (TFF logo)"
-echo "  Or:       tforensic-desktop"
-echo "  Deps:     tforensic deps"
-echo ""
-echo "If the menu icon looks wrong: log out and back in (icon cache)."
-echo "If click does nothing: run  tforensic-desktop  in a terminal, or see"
-echo "  ~/.cache/tforensic/launch.log"
-echo ""
+# Re-exec so the *new* update.sh runs post-pull steps (venv pip, desktop-npm-install, …).
+export TFF_UPDATE_POST_PULL=1
+export TFF_UPDATE_OLD_VER="$OLD_VER"
+export TFF_UPDATE_STASHED="$STASHED"
+exec "$ROOT/update.sh"
