@@ -129,11 +129,11 @@ Optional: `pip install -e ./engine`
 ./scripts/run-desktop.sh
 ```
 
-First run runs `npm install` in `desktop/` (needs Node.js). The app:
+First run runs `npm install` in `desktop/` (needs **Node.js 20 or 22 LTS** recommended). The app:
 
 1. Spawns `python3 -m tforensic serve` on an ephemeral loopback port
 2. Loads the UI in an iframe
-3. Can open an embedded terminal (`node-pty` + xterm) with `scripts/tforensic` on `PATH`
+3. Can open an embedded terminal (`node-pty` + xterm) with `scripts/tforensic` on `PATH` — optional; see [docs/DESKTOP.md](docs/DESKTOP.md) for Kali / Node 24 / Python 3.14 build notes
 
 ## Tests
 

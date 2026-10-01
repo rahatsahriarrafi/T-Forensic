@@ -71,7 +71,7 @@ python3 -m pip install --user -r "$ROOT/requirements.txt" || \
 
 if command -v npm >/dev/null 2>&1 && [[ -f "$ROOT/desktop/package.json" ]]; then
   echo "==> Refreshing desktop npm deps…"
-  (cd "$ROOT/desktop" && npm install)
+  "$ROOT/scripts/desktop-npm-install.sh"
 fi
 
 # Re-register app menu (paths may be unchanged, but safe)

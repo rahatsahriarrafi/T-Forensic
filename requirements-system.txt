@@ -29,6 +29,9 @@ samdump2
 # --- Optional carve ---
 testdisk
 
-# --- Desktop (Electron) ---
+# --- Desktop (Electron) — Node 20/22 LTS recommended; see docs/DESKTOP.md ---
+# build-essential
+# python3-dev
+# python3-setuptools
 # nodejs
 # npm

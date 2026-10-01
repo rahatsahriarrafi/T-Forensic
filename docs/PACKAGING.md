@@ -12,7 +12,7 @@ This will:
 
 1. `pip install -r requirements.txt` (**required** — TFF will not start without it)
 2. `sudo apt install …` packages from `requirements-system.txt` (skip with `TFF_SKIP_APT=1`)
-3. `npm install` in `desktop/`
+3. `npm install` in `desktop/` (via `scripts/desktop-npm-install.sh`; see [DESKTOP.md](DESKTOP.md))
 4. Register **T Forensic** in your application menu (`~/.local/share/applications/`)
 5. Symlink `tforensic` / `tforensic-desktop` into `~/.local/bin`
 

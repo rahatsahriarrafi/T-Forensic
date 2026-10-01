@@ -43,7 +43,7 @@ fi
 # --- Desktop (Electron) ---
 if command -v npm >/dev/null 2>&1; then
   echo "==> Desktop (Electron) npm install…"
-  (cd "$ROOT/desktop" && npm install)
+  "$ROOT/scripts/desktop-npm-install.sh"
 else
   echo "warn: npm not found — install Node.js to use the desktop app." >&2
   echo "      CLI/web still work:  tforensic serve" >&2
