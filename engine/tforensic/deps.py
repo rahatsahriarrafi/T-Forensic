@@ -172,7 +172,7 @@ def check_dependencies() -> dict[str, Any]:
             feature="Windows Prefetch viewer",
             ok=_has_mod("pyscca"),
             check="import pyscca",
-            suggestion="sudo apt install python3-libscca",
+            suggestion="sudo apt install python3-libscca · then ./update.sh",
             apt="python3-libscca",
         ),
         Dep(
@@ -182,7 +182,7 @@ def check_dependencies() -> dict[str, Any]:
             feature="ShellBags / registry hive browse",
             ok=_has_mod("pyregf"),
             check="import pyregf",
-            suggestion="sudo apt install python3-libregf python3-libfwsi",
+            suggestion="sudo apt install python3-libregf python3-libfwsi · then ./update.sh",
             apt="python3-libregf python3-libfwsi",
         ),
         Dep(
@@ -192,7 +192,7 @@ def check_dependencies() -> dict[str, Any]:
             feature="ShellBags shell-item names",
             ok=_has_mod("pyfwsi"),
             check="import pyfwsi",
-            suggestion="sudo apt install python3-libfwsi",
+            suggestion="sudo apt install python3-libfwsi · then ./update.sh",
             apt="python3-libfwsi",
         ),
         Dep(
