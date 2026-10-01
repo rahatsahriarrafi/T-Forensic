@@ -362,10 +362,9 @@ def check_dependencies() -> dict[str, Any]:
             "commands": install_lines,
         },
         "hint": (
-            "REQUIRED first: ./install.sh  (or scripts/install-python-reqs.sh) — TFF refuses to start without requirements.txt packages. "
-            "On Kali this uses a project .venv (PEP 668). Do not use --break-system-packages unless you know you need it. ",
-
-            "Then: tforensic deps for optional system tools."
+            "REQUIRED first: ./install.sh (creates .venv on Kali). "
+            "Then: ./update.sh installs system tools from requirements-system.txt "
+            "(xmount, sleuthkit, qemu-utils, …). Check: tforensic deps"
         ),
     }
 
@@ -392,5 +391,8 @@ def format_deps_text(report: Optional[dict[str, Any]] = None) -> str:
         for c in cmds:
             lines.append(f"  {c}")
     lines.append("")
-    lines.append(report.get("hint") or "")
-    return "\n".join(lines)
+    hint = report.get("hint") or ""
+    if isinstance(hint, (tuple, list)):
+        hint = " ".join(str(x) for x in hint)
+    lines.append(str(hint))
+    return "\n".join(str(x) for x in lines)
