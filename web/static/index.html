@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Orbitron:wght@600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=tff24">
+<link rel="stylesheet" href="/static/style.css?v=tff25">
 </head>
 <body class="gui-dashboard">
 <header>
@@ -25,6 +25,10 @@
     <span id="work-status-text">Working…</span>
   </div>
   <button type="button" id="btn-nav-back" class="nav-back" title="Back to previous file/folder" disabled>← Back</button>
+  <button type="button" id="btn-open-evidence" class="nav-grep" title="Choose an evidence file from your computer">Open evidence…</button>
+  <button type="button" id="btn-open-path" class="nav-grep" title="Open evidence by absolute path on this machine">Path…</button>
+  <input type="file" id="evidence-file" hidden
+    accept=".ad1,.AD1,.e01,.E01,.ex01,.EX01,.ewf,.s01,.dd,.raw,.img,.vdi,.qcow2,.vmdk,.vhd,.vhdx,.ova,.OVA,.pcap,.pcapng,.cap,.dmp,.pkt,.snoop,.erf,.ntar,.pklg">
   <input id="search" type="search" placeholder="Search whole image — Enter / Search…" autocomplete="off" title="Searches the entire loaded image">
   <button type="button" id="btn-search" class="nav-grep" title="Search whole image">Search</button>
   <button type="button" id="btn-folder-grep" class="nav-grep" title="Jump to Inside search (below)">Inside ↓</button>
@@ -61,7 +65,10 @@
         <div id="case-list" class="disk-list"></div>
         <div id="case-info" class="disk-list muted">No case open</div>
         <label class="disk-label">Add evidence path
-          <input id="case-ev-path" type="text" placeholder="/path/to/image.ad1 or .E01">
+          <div class="path-row">
+            <input id="case-ev-path" type="text" placeholder="/path/to/image.ad1 or .E01">
+            <button type="button" id="case-ev-browse" class="disk-btn secondary" title="Pick a file">Browse…</button>
+          </div>
         </label>
         <div class="disk-actions">
           <button id="case-add" class="disk-btn">Add evidence</button>
@@ -151,7 +158,10 @@
       <div class="disk-panel">
         <div class="disk-status muted" id="xm-status">Checking xmount…</div>
         <label class="disk-label">Image path
-          <input id="xm-image" type="text" placeholder="/path/to/evidence.E01">
+          <div class="path-row">
+            <input id="xm-image" type="text" placeholder="/path/to/evidence.E01">
+            <button type="button" id="xm-browse" class="disk-btn secondary" title="Pick a file">Browse…</button>
+          </div>
         </label>
         <div class="disk-row">
           <label>In
@@ -190,7 +200,10 @@
       <div class="disk-panel">
         <div class="disk-status muted" id="pcap-status">Checking tshark…</div>
         <label class="disk-label">PCAP / packet capture path
-          <input id="pcap-path" type="text" placeholder="/path/to/capture.pcap (.pcapng .cap .dmp .pkt …)">
+          <div class="path-row">
+            <input id="pcap-path" type="text" placeholder="/path/to/capture.pcap (.pcapng .cap .dmp .pkt …)">
+            <button type="button" id="pcap-browse" class="disk-btn secondary" title="Pick a file">Browse…</button>
+          </div>
         </label>
         <label class="disk-label">Display filter (Wireshark syntax)
           <input id="pcap-filter" type="text" placeholder="http || dns || tcp.port==443">
@@ -230,7 +243,7 @@
       <button id="export-btn" class="dtab dl" hidden>Export</button>
       <a id="dl" class="dtab dl" href="#" hidden>⬇ Download</a>
     </div>
-    <div id="detail-body"><pre class="muted">Nothing loaded.</pre></div>
+    <div id="detail-body"><pre class="muted">Nothing loaded — click Open evidence… to select a file.</pre></div>
   </section>
 </main>
 
@@ -283,6 +296,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=tff24"></script>
+<script src="/static/app.js?v=tff25"></script>
 </body>
 </html>

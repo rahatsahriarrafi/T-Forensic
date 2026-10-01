@@ -164,6 +164,25 @@ body.is-working { cursor: progress; }
   opacity: 0.4;
   cursor: default;
 }
+.path-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.path-row input {
+  flex: 1;
+  min-width: 0;
+}
+.path-row .disk-btn {
+  flex-shrink: 0;
+  align-self: stretch;
+}
+.fmt-open-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
 .inside-bar {
   display: flex;
   align-items: center;

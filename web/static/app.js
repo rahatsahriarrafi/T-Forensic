@@ -1643,6 +1643,148 @@ if (hitPanel) {
 }
 updateNavChrome();
 
+/** Browser evidence open — file picker uploads to local API; path opens server-local files. */
+async function refreshAfterOpen() {
+  await loadInfo();
+  await loadTree();
+  await loadFindings();
+  try { await loadXmount(); } catch (_) {}
+  try { await refreshPcapStatus(); } catch (_) {}
+}
+
+async function openEvidencePath(path) {
+  path = (path || "").trim();
+  if (!path) {
+    toast({
+      title: "Missing path",
+      message: "Enter an absolute path on this machine.",
+      suggestion: "Example: /home/you/evidence.ad1",
+      kind: "err",
+    });
+    return null;
+  }
+  showBusy("Opening evidence…", path, "Parsing or mounting the selected image.");
+  try {
+    const d = await api("/api/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    if (d.error) {
+      notifyError(d, "Open failed");
+      return null;
+    }
+    toast({ title: "Evidence open", message: d.image || path, kind: "ok" });
+    await refreshAfterOpen();
+    return d;
+  } catch (e) {
+    notifyError({
+      title: "Open failed",
+      error: e.message || String(e),
+      suggestion: "Check the path exists on the machine running tforensic serve.",
+    });
+    return null;
+  } finally {
+    hideBusy();
+  }
+}
+
+async function openEvidenceUpload(file, { fillInput, openAfter = true } = {}) {
+  if (!file) return null;
+  showBusy(
+    openAfter ? "Opening evidence…" : "Uploading…",
+    file.name,
+    openAfter
+      ? "Uploading to the local server, then opening for analysis."
+      : "Saving the file so the path field can use it."
+  );
+  try {
+    const r = await fetch("/api/open-upload", {
+      method: "POST",
+      headers: {
+        "X-Filename": file.name,
+        "Content-Type": "application/octet-stream",
+        "X-Open": openAfter ? "1" : "0",
+      },
+      body: file,
+    });
+    const ct = r.headers.get("content-type") || "";
+    const d = ct.includes("application/json") ? await r.json() : { error: r.statusText };
+    if (!r.ok || d.error) {
+      notifyError(d, "Upload / open failed");
+      return null;
+    }
+    const path = d.uploaded_path || d.image_path || d.pcap_path || "";
+    if (fillInput && path) {
+      fillInput.value = path;
+      fillInput.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    if (openAfter) {
+      toast({ title: "Evidence open", message: d.image || file.name, kind: "ok" });
+      await refreshAfterOpen();
+    } else {
+      toast({
+        title: "File ready",
+        message: path || file.name,
+        suggestion: "Path filled — click Mount / Open / Add evidence.",
+        kind: "ok",
+      });
+    }
+    return d;
+  } catch (e) {
+    notifyError({
+      title: "Upload failed",
+      error: e.message || String(e),
+      suggestion: "Retry, or use Path… for large images already on disk.",
+    });
+    return null;
+  } finally {
+    hideBusy();
+  }
+}
+
+function pickEvidenceFile(opts = {}) {
+  const input = $("#evidence-file");
+  if (!input) {
+    toast({
+      title: "Picker unavailable",
+      message: "Reload the page and try again.",
+      kind: "err",
+    });
+    return;
+  }
+  input.value = "";
+  const onChange = async () => {
+    input.removeEventListener("change", onChange);
+    const file = input.files && input.files[0];
+    if (!file) return;
+    await openEvidenceUpload(file, opts);
+  };
+  input.addEventListener("change", onChange);
+  input.click();
+}
+
+$("#btn-open-evidence")?.addEventListener("click", () => {
+  pickEvidenceFile({ openAfter: true });
+});
+$("#btn-open-path")?.addEventListener("click", async () => {
+  const path = window.prompt(
+    "Absolute path to evidence on this machine (AD1, E01, OVA, PCAP, …):",
+    ""
+  );
+  if (path == null) return;
+  await openEvidencePath(path);
+});
+$("#xm-browse")?.addEventListener("click", () => {
+  pickEvidenceFile({ fillInput: $("#xm-image"), openAfter: false });
+});
+$("#pcap-browse")?.addEventListener("click", () => {
+  pickEvidenceFile({ fillInput: $("#pcap-path"), openAfter: false });
+});
+$("#case-ev-browse")?.addEventListener("click", () => {
+  pickEvidenceFile({ fillInput: $("#case-ev-path"), openAfter: false });
+});
+
 // Desktop shell reads this when opening Terminal on the selected file
 window.__tffGetSelection = () => ({
   path: selPath || null,
@@ -1717,8 +1859,24 @@ async function loadFormats() {
       `xmount: ${xm.available ? "yes" : "no"}` +
       (xm.inputs && xm.inputs.length ? ` · in: ${xm.inputs.join(", ")}` : "") +
       `<br>sleuthkit mmls/fls: ${sk.mmls ? "yes" : "no"} / ${sk.fls ? "yes" : "no"}` +
-      `<br>Open via desktop <strong>Open image…</strong> or CLI <code>tforensic open / serve</code>`;
+      `<br>Use <strong>Open evidence…</strong> in the header to pick a file, or <strong>Path…</strong> for a local absolute path.`;
     box.appendChild(foot);
+
+    const actions = document.createElement("div");
+    actions.className = "fmt-open-actions";
+    const bFile = document.createElement("button");
+    bFile.type = "button";
+    bFile.className = "disk-btn";
+    bFile.textContent = "Open evidence…";
+    bFile.onclick = () => pickEvidenceFile({ openAfter: true });
+    const bPath = document.createElement("button");
+    bPath.type = "button";
+    bPath.className = "disk-btn secondary";
+    bPath.textContent = "Open by path…";
+    bPath.onclick = () => $("#btn-open-path")?.click();
+    actions.appendChild(bFile);
+    actions.appendChild(bPath);
+    box.insertBefore(actions, foot);
 
     // Also show summary in empty detail if still default
     const body = $("#detail-body");
@@ -1729,7 +1887,7 @@ async function loadFormats() {
         (d.catalog || []).map((g) =>
           `${g.group}\n  ${(g.extensions || []).join("  ")}\n  ${g.notes || ""}`
         ).join("\n\n") +
-        `\n\nUse File → Open image… or the Formats tab.</pre>`;
+        `\n\nClick Open evidence… in the header to select a file for analysis.</pre>`;
     }
   } catch (e) {
     box.innerHTML = `<pre class="muted">Could not load formats: ${escapeHtml(e.message)}</pre>`;

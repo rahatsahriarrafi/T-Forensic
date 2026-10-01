@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
+import tempfile
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,6 +21,31 @@ from dataclasses import asdict
 
 CASE: Optional[object] = None  # Case | DiskCase | PcapCase
 WEB_DIR: str = ""
+
+
+def _uploads_dir() -> Path:
+    d = Path(tempfile.gettempdir()) / "tforensic-uploads"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _safe_upload_name(name: str) -> str:
+    base = Path(name or "upload.bin").name
+    base = re.sub(r"[^\w.\-+()\[\] ]+", "_", base).strip(" .") or "upload.bin"
+    return base[:200]
+
+
+def _unique_upload_path(dest_dir: Path, name: str) -> Path:
+    dest = dest_dir / name
+    if not dest.exists():
+        return dest
+    stem, suf = dest.stem, dest.suffix
+    n = 1
+    while True:
+        cand = dest_dir / f"{stem}_{n}{suf}"
+        if not cand.exists():
+            return cand
+        n += 1
 
 
 def _is_ad1_case(c) -> bool:
@@ -65,7 +92,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header(
+            "Access-Control-Allow-Headers",
+            "Content-Type, X-Filename, X-Open",
+        )
         self.end_headers()
 
     def do_GET(self):
@@ -306,7 +336,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
-        length = int(self.headers.get("Content-Length", 0))
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if parsed.path == "/api/open-upload":
+            try:
+                return self._api_open_upload(length)
+            except Exception as e:
+                from tforensic.errors import explain_exception
+                return self._send(500, explain_exception(e, "open").as_dict())
         raw = self.rfile.read(length) if length else b"{}"
         try:
             body = json.loads(raw.decode("utf-8") or "{}")
@@ -317,6 +353,8 @@ class Handler(BaseHTTPRequestHandler):
                 "suggestion": "Retry the action from the UI, or check the API JSON payload.",
             })
         try:
+            if parsed.path == "/api/open":
+                return self._api_open(body)
             if parsed.path == "/api/export":
                 if CASE is None:
                     return self._send(400, {"error": "no triage case", "suggestion": "Use Case tab export"})
@@ -358,6 +396,111 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             from tforensic.errors import explain_exception
             self._send(500, explain_exception(e, "mount").as_dict())
+
+    def _close_active_case(self):
+        global CASE
+        if CASE is None:
+            return
+        try:
+            CASE.close()
+        except Exception:
+            pass
+        CASE = None
+
+    def _api_open(self, body):
+        global CASE
+        path = (body.get("path") or "").strip()
+        if not path:
+            return self._send(400, {
+                "error": "path required",
+                "title": "Missing path",
+                "suggestion": "Pass {\"path\": \"/path/to/evidence.ad1\"} or use Open evidence…",
+            })
+        path = str(Path(path).expanduser())
+        if not os.path.isfile(path):
+            return self._send(400, {
+                "error": f"file not found: {path}",
+                "title": "Evidence not found",
+                "suggestion": "Use Open evidence… to pick a file, or enter a path that exists on this machine.",
+            })
+        self._close_active_case()
+        CASE = open_evidence(
+            path,
+            input_type=body.get("input_type") or None,
+            output_type=body.get("output_type") or "raw",
+            morph=body.get("morph") or "combine",
+            cache=body.get("cache") or None,
+        )
+        return self._send(200, CASE.info())
+
+    def _api_open_upload(self, length: int):
+        """Accept raw file body (browser File) and open it as evidence."""
+        global CASE
+        if length <= 0:
+            return self._send(400, {
+                "error": "empty upload",
+                "title": "No file",
+                "suggestion": "Choose an evidence file with Open evidence…",
+            })
+        # Cap extremely large uploads in-memory stream is fine for local loopback,
+        # but refuse absurd Content-Lengths that are clearly mistakes.
+        max_bytes = 64 * 1024 * 1024 * 1024  # 64 GiB hard ceiling
+        if length > max_bytes:
+            # Drain / reject without writing
+            remaining = length
+            while remaining > 0:
+                chunk = self.rfile.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+            return self._send(400, {
+                "error": "upload too large",
+                "title": "File too large",
+                "suggestion": "For huge images, use Open by path… with a local filesystem path.",
+            })
+        fname = self.headers.get("X-Filename") or "upload.bin"
+        dest = _unique_upload_path(_uploads_dir(), _safe_upload_name(fname))
+        remaining = length
+        chunk_size = 1024 * 1024
+        try:
+            with open(dest, "wb") as f:
+                while remaining > 0:
+                    chunk = self.rfile.read(min(chunk_size, remaining))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    remaining -= len(chunk)
+            if remaining > 0:
+                try:
+                    dest.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                return self._send(400, {
+                    "error": "incomplete upload",
+                    "title": "Upload failed",
+                    "suggestion": "Retry Open evidence… or use Open by path…",
+                })
+            open_it = (self.headers.get("X-Open") or "1").strip().lower() not in (
+                "0", "false", "no",
+            )
+            if not open_it:
+                return self._send(200, {
+                    "ok": True,
+                    "uploaded_path": str(dest),
+                    "name": dest.name,
+                    "size": dest.stat().st_size,
+                })
+            self._close_active_case()
+            CASE = open_evidence(str(dest))
+            info = CASE.info()
+            info["uploaded_path"] = str(dest)
+            return self._send(200, info)
+        except Exception:
+            try:
+                dest.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
 
     def _disk_tree(self):
         """Synthetic tree for disk mode: partitions as expandable children."""
