@@ -77,7 +77,20 @@ cd T-Forensic
 After install, open **T Forensic** from your application menu (same desktop app).  
 Or run: `tforensic-desktop` / `./scripts/run-desktop.sh`
 
-**TFF will not start until `requirements.txt` is installed** (`./install.sh` does this).
+### Update to the newest version (one command)
+
+If you already cloned an older copy:
+
+```bash
+cd T-Forensic
+./update.sh
+```
+
+Or (after `./install.sh` once): `tforensic-update`
+
+That pulls from GitHub, refreshes Python/npm deps, and re-registers the app menu entry.
+
+**TFF will not start until `requirements.txt` is installed** (`./install.sh` / `./update.sh` do this).
 
 See [docs/PACKAGING.md](docs/PACKAGING.md) for AppImage packaging and apt options (`TFF_SKIP_APT=1`).
 

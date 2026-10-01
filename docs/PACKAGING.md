@@ -18,6 +18,16 @@ This will:
 
 Then open **T Forensic** from the app list (or run `tforensic-desktop`).
 
+## Update (one command)
+
+```bash
+cd T-Forensic
+./update.sh
+# or: tforensic-update
+```
+
+Pulls latest `main` from GitHub, reinstalls `requirements.txt`, refreshes Electron deps, and rewrites the app-menu launcher.
+
 Re-install / refresh the menu entry only:
 
 ```bash

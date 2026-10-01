@@ -54,6 +54,7 @@ BIN_DIR="${HOME}/.local/bin"
 mkdir -p "$BIN_DIR"
 ln -sfn "$ROOT/scripts/tforensic" "$BIN_DIR/tforensic"
 ln -sfn "$ROOT/scripts/run-desktop.sh" "$BIN_DIR/tforensic-desktop"
+ln -sfn "$ROOT/update.sh" "$BIN_DIR/tforensic-update"
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *) echo "note: add to PATH:  export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
@@ -69,4 +70,5 @@ echo "  Check deps:   tforensic deps"
 echo "  Desktop app:  open “T Forensic” from your application menu"
 echo "                or:  tforensic-desktop"
 echo "  Web UI:       tforensic serve"
+echo "  Later update: ./update.sh   (or: tforensic-update)"
 echo ""

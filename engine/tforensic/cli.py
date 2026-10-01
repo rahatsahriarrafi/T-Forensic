@@ -265,6 +265,24 @@ def cmd_deps(args):
     return 0 if report.get("complete") else 2
 
 
+def cmd_update(args):
+    """Run repo update.sh (git pull + refresh deps / desktop launcher)."""
+    import subprocess
+    from pathlib import Path
+
+    # engine/tforensic/cli.py → repo root is parents[2]
+    root = Path(__file__).resolve().parents[2]
+    script = root / "update.sh"
+    if not script.is_file():
+        print(
+            f"error: update.sh not found at {script}\n"
+            "Clone the GitHub repo and run: ./update.sh",
+            file=sys.stderr,
+        )
+        return 1
+    return subprocess.call(["bash", str(script)])
+
+
 def cmd_xmount_info(args):
     from tforensic.xmount_wrap import probe
 
@@ -590,6 +608,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true", help="machine-readable report")
     sp.set_defaults(func=cmd_deps)
 
+    sp = sub.add_parser(
+        "update",
+        help="pull latest from GitHub and refresh deps / desktop launcher (./update.sh)",
+    )
+    sp.set_defaults(func=cmd_update)
+
     # ---- xmount / disk images ----
     sp = sub.add_parser("xmount-info", help="show xmount / sleuthkit availability")
     sp.set_defaults(func=cmd_xmount_info)
@@ -645,7 +669,7 @@ def main(argv=None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     # Allow `deps` / `deps --json` without requirements so users can discover the fix.
     cmd = next((a for a in argv if not a.startswith("-")), None)
-    if cmd not in (None, "deps"):
+    if cmd not in (None, "deps", "update"):
         from tforensic.deps import ensure_requirements
 
         ok, msg = ensure_requirements()
