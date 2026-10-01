@@ -16,6 +16,7 @@ virtual-write cache, exports, and reports — never the source image.
 |------|---------|
 | **Install** (first time) | `git clone https://github.com/rahatsahriarrafi/T-Forensic.git && cd T-Forensic && ./install.sh` |
 | **Update** (already cloned) | `cd T-Forensic && ./update.sh` |
+| **Install all requirements only** | `./scripts/install-all-reqs.sh` · or `tforensic deps --install` |
 | **Desktop app** | Application menu → **T Forensic** · or `tforensic-desktop` |
 | **Check tools** | `tforensic deps` |
 | **Web UI** | `tforensic serve` |

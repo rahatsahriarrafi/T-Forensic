@@ -17,16 +17,12 @@ if [[ ! -f "$ROOT/requirements.txt" ]]; then
   exit 1
 fi
 
-# --- Python ---
-echo "==> Python packages (requirements.txt)…"
-"$ROOT/scripts/install-python-reqs.sh" "$ROOT/requirements.txt"
+# --- Python + system requirements (one shot — no manual apt) ---
+echo "==> Installing all requirements (Python + system)…"
+"$ROOT/scripts/install-all-reqs.sh"
 
 export PYTHONPATH="${ROOT}/engine${PYTHONPATH:+:$PYTHONPATH}"
 export PATH="${ROOT}/scripts:${PATH}"
-
-# --- System tools (xmount, sleuthkit, qemu-utils, …) ---
-echo "==> System packages (requirements-system.txt)…"
-"$ROOT/scripts/install-system-reqs.sh" "$ROOT/requirements-system.txt"
 
 # --- Desktop (Electron) ---
 if command -v npm >/dev/null 2>&1; then

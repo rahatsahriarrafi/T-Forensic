@@ -1,13 +1,7 @@
 # Team Forensic Framework (TFF) — system packages (Debian/Kali/Ubuntu)
-# Installed automatically by:
-#   ./install.sh
-#   ./update.sh
-# Skip with:  TFF_SKIP_APT=1 ./update.sh
-#
-# Or manually:
-#   sudo apt install $(grep -vE '^\s*(#|$)' requirements-system.txt | tr '\n' ' ')
-#
-# Check what's missing:  tforensic deps
+# Auto-installed by ./install.sh and ./update.sh (via scripts/install-all-reqs.sh).
+# No manual download needed when users follow those commands.
+# Skip:  TFF_SKIP_APT=1 ./update.sh
 
 # --- Required to open disk / OVA / E01 images ---
 xmount
@@ -35,10 +29,11 @@ testdisk
 # --- Python venv support (Kali PEP 668) ---
 python3-venv
 python3-full
+python3-pip
 
-# --- Desktop (Electron) — Node 20/22 LTS recommended; see docs/DESKTOP.md ---
-# build-essential
-# python3-dev
-# python3-setuptools
-# nodejs
-# npm
+# --- Desktop app (Electron) build/runtime helpers ---
+nodejs
+npm
+build-essential
+python3-dev
+python3-setuptools

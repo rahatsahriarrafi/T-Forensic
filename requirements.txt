@@ -1,11 +1,19 @@
-# Team Forensic Framework (TFF) — Python packages
-# Install:  ./install.sh   or   ./scripts/install-python-reqs.sh
-# Update:   ./update.sh    (refreshes Python + system tools below)
+# Team Forensic Framework (TFF) — ALL installable requirements
 #
-# System tools required to OPEN disk/OVA/PCAP evidence (apt — not pip):
-#   see requirements-system.txt  →  installed by ./install.sh and ./update.sh
-#   Required for image open:  xmount  sleuthkit  qemu-utils  fuse3
-#   Also recommended:         tshark  john  hashcat  python3-libscca …
-# Check anytime:  tforensic deps
+# ONE COMMAND (installs Python + system tools — no manual downloads):
+#   ./install.sh
+#   ./update.sh
+#   ./scripts/install-all-reqs.sh
+#
+# What gets installed:
+#   1) This file (pip)           → Python packages into .venv on Kali
+#   2) requirements-system.txt   → apt: xmount, sleuthkit, qemu-utils, tshark, …
+#
+# You do NOT need to run "sudo apt install …" by hand if you use ./install.sh
+# or ./update.sh (they call install-all-reqs / install-system-reqs).
+#
+# Check:  tforensic deps
+# Force install missing system tools:  tforensic deps --install
 
+# --- Python (pip) ---
 impacket>=0.11.0,<1

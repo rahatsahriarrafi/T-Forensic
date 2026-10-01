@@ -23,25 +23,16 @@ tff_post_pull() {
   local OLD_VER="${1:-?}"
   local STASHED="${2:-0}"
 
-  echo "==> Refreshing Python requirements…"
-  if [[ -x "$ROOT/scripts/install-python-reqs.sh" ]]; then
-    "$ROOT/scripts/install-python-reqs.sh" "$ROOT/requirements.txt"
+  echo "==> Refreshing ALL requirements (Python + system)…"
+  if [[ -x "$ROOT/scripts/install-all-reqs.sh" ]]; then
+    "$ROOT/scripts/install-all-reqs.sh"
   else
-    if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-      python3 -m pip install -r "$ROOT/requirements.txt"
-    else
-      python3 -m pip install --user -r "$ROOT/requirements.txt" || \
-        python3 -m pip install -r "$ROOT/requirements.txt"
+    if [[ -x "$ROOT/scripts/install-python-reqs.sh" ]]; then
+      "$ROOT/scripts/install-python-reqs.sh" "$ROOT/requirements.txt"
     fi
-  fi
-
-  echo "==> Refreshing system packages (requirements-system.txt)…"
-  echo "    Ensures xmount / sleuthkit / qemu-utils for opening images."
-  if [[ -x "$ROOT/scripts/install-system-reqs.sh" ]]; then
-    "$ROOT/scripts/install-system-reqs.sh" "$ROOT/requirements-system.txt"
-  elif command -v apt-get >/dev/null 2>&1 && [[ "${TFF_SKIP_APT:-}" != "1" ]]; then
-    # shellcheck disable=SC2046
-    sudo apt-get install -y $(grep -vE '^\s*(#|$)' "$ROOT/requirements-system.txt" | tr '\n' ' ') || true
+    if [[ -x "$ROOT/scripts/install-system-reqs.sh" ]]; then
+      "$ROOT/scripts/install-system-reqs.sh" "$ROOT/requirements-system.txt"
+    fi
   fi
 
   if command -v npm >/dev/null 2>&1 && [[ -f "$ROOT/desktop/package.json" ]]; then

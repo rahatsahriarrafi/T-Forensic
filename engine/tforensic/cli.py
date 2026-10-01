@@ -257,6 +257,20 @@ def cmd_serve(args):
 def cmd_deps(args):
     from tforensic.deps import check_dependencies, format_deps_text
 
+    if getattr(args, "install", False):
+        import subprocess
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2]
+        script = root / "scripts" / "install-all-reqs.sh"
+        if not script.is_file():
+            print(f"error: {script} missing — run ./install.sh from the repo", file=sys.stderr)
+            return 1
+        print("==> Installing all requirements (Python + system)…")
+        code = subprocess.call(["bash", str(script)])
+        if code != 0:
+            return code
+
     report = check_dependencies()
     if getattr(args, "json", False):
         print(json.dumps(report, indent=2))
@@ -606,6 +620,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("deps", help="check runtime tools and print install suggestions")
     sp.add_argument("--json", action="store_true", help="machine-readable report")
+    sp.add_argument(
+        "--install",
+        action="store_true",
+        help="install ALL requirements (pip + apt via scripts/install-all-reqs.sh)",
+    )
     sp.set_defaults(func=cmd_deps)
 
     sp = sub.add_parser(
