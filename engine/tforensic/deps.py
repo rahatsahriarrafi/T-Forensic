@@ -70,7 +70,7 @@ def check_requirements_txt() -> dict[str, Any]:
                     "suggestion": f"Missing {path} — clone the full repo or restore requirements.txt",
                 }
             ],
-            "install": "pip install -r requirements.txt",
+            "install": "./install.sh   # or: scripts/install-python-reqs.sh (creates .venv on Kali)",
             "message": f"requirements.txt not found at {path}",
         }
 
@@ -86,7 +86,7 @@ def check_requirements_txt() -> dict[str, Any]:
                 {
                     "name": name,
                     "module": mod,
-                    "suggestion": f"pip install -r requirements.txt   # needs: {name}",
+                    "suggestion": f"./install.sh   # or: scripts/install-python-reqs.sh  (needs: {name})",
                 }
             )
 
@@ -96,11 +96,11 @@ def check_requirements_txt() -> dict[str, Any]:
         "path": str(path),
         "packages": packages,
         "missing": missing,
-        "install": "pip install -r requirements.txt",
+        "install": "./install.sh   # creates .venv on Kali/Debian (PEP 668)",
         "message": (
             "requirements.txt satisfied."
             if ok
-            else "TFF will not start until requirements.txt is installed."
+            else "TFF will not start until requirements.txt is installed (./install.sh)."
         ),
     }
 
@@ -362,7 +362,9 @@ def check_dependencies() -> dict[str, Any]:
             "commands": install_lines,
         },
         "hint": (
-            "REQUIRED first: pip install -r requirements.txt — TFF refuses to start without it. "
+            "REQUIRED first: ./install.sh  (or scripts/install-python-reqs.sh) — TFF refuses to start without requirements.txt packages. "
+            "On Kali this uses a project .venv (PEP 668). Do not use --break-system-packages unless you know you need it. ",
+
             "Then: tforensic deps for optional system tools."
         ),
     }

@@ -8,6 +8,8 @@ cd T-Forensic
 ./install.sh
 ```
 
+On **Kali/Debian**, `./install.sh` creates a project `.venv` automatically (PEP 668 — system `pip` is blocked). You do **not** need `--break-system-packages`.
+
 Then open **T Forensic** from your application menu, or:
 
 ```bash

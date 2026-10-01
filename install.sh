@@ -71,4 +71,7 @@ echo "  Desktop app:  open “T Forensic” from your application menu"
 echo "                or:  tforensic-desktop"
 echo "  Web UI:       tforensic serve"
 echo "  Later update: ./update.sh   (or: tforensic-update)"
+if [[ -x "$ROOT/.venv/bin/python3" ]]; then
+  echo "  Python venv:  $ROOT/.venv  (auto-used by launchers; no activate needed)"
+fi
 echo ""

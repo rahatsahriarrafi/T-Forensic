@@ -39,7 +39,10 @@ Re-install / refresh the menu entry only:
 Python:
 
 ```bash
-pip install -r requirements.txt
+./install.sh
+# or just Python deps:
+./scripts/install-python-reqs.sh
+# On Kali/Debian this creates ./.venv automatically (PEP 668).
 ```
 
 System (Debian/Kali/Ubuntu):

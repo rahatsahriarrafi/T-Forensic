@@ -106,7 +106,7 @@ See the [Commands table at the top](#commands-install--update) and **[COMMANDS.m
 
 ```bash
 cd T-Forensic
-python3 -m pip install -r requirements.txt   # REQUIRED
+python3 -m pip install -r requirements.txt   # REQUIRED (or ./install.sh — creates .venv on Kali)
 # optional: sudo apt install $(grep -vE '^\s*(#|$)' requirements-system.txt | tr '\n' ' ')
 
 export PYTHONPATH="$PWD/engine"
