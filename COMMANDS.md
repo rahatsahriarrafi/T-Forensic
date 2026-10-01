@@ -31,8 +31,8 @@ tforensic update
 ```
 
 After update: open **T Forensic** from the app menu (TFF logo).  
-If the old icon still shows, log out/in once.  
-If a click does nothing, run `tforensic-desktop` in a terminal or check `~/.cache/tforensic/launch.log`.
+`./update.sh` also installs **system tools** from `requirements-system.txt` (`xmount`, `sleuthkit`, `qemu-utils`, …) so disk/OVA open works.  
+Skip apt with `TFF_SKIP_APT=1 ./update.sh` if needed.
 
 ## Check missing tools
 

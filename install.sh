@@ -24,21 +24,9 @@ echo "==> Python packages (requirements.txt)…"
 export PYTHONPATH="${ROOT}/engine${PYTHONPATH:+:$PYTHONPATH}"
 export PATH="${ROOT}/scripts:${PATH}"
 
-# --- Optional system tools ---
-if [[ "${TFF_SKIP_APT:-}" != "1" ]]; then
-  if command -v apt-get >/dev/null 2>&1; then
-    echo "==> System packages (Debian/Kali/Ubuntu)…"
-    echo "    Set TFF_SKIP_APT=1 to skip this step."
-    # shellcheck disable=SC2046
-    sudo apt-get install -y $(grep -vE '^\s*(#|$)' "$ROOT/requirements-system.txt" | tr '\n' ' ') || {
-      echo "warn: apt install had errors — continue; run: tforensic deps" >&2
-    }
-  else
-    echo "==> Skipping apt (no apt-get). Install tools from requirements-system.txt manually."
-  fi
-else
-  echo "==> Skipping apt (TFF_SKIP_APT=1)"
-fi
+# --- System tools (xmount, sleuthkit, qemu-utils, …) ---
+echo "==> System packages (requirements-system.txt)…"
+"$ROOT/scripts/install-system-reqs.sh" "$ROOT/requirements-system.txt"
 
 # --- Desktop (Electron) ---
 if command -v npm >/dev/null 2>&1; then

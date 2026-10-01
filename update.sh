@@ -35,6 +35,15 @@ tff_post_pull() {
     fi
   fi
 
+  echo "==> Refreshing system packages (requirements-system.txt)…"
+  echo "    Ensures xmount / sleuthkit / qemu-utils for opening images."
+  if [[ -x "$ROOT/scripts/install-system-reqs.sh" ]]; then
+    "$ROOT/scripts/install-system-reqs.sh" "$ROOT/requirements-system.txt"
+  elif command -v apt-get >/dev/null 2>&1 && [[ "${TFF_SKIP_APT:-}" != "1" ]]; then
+    # shellcheck disable=SC2046
+    sudo apt-get install -y $(grep -vE '^\s*(#|$)' "$ROOT/requirements-system.txt" | tr '\n' ' ') || true
+  fi
+
   if command -v npm >/dev/null 2>&1 && [[ -f "$ROOT/desktop/package.json" ]]; then
     echo "==> Refreshing desktop npm deps…"
     if [[ -x "$ROOT/scripts/desktop-npm-install.sh" ]]; then

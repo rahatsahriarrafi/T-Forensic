@@ -1,12 +1,15 @@
 # Team Forensic Framework (TFF) — system packages (Debian/Kali/Ubuntu)
-# Install everything recommended:
-#   sudo apt install $(grep -v '^#' requirements-system.txt | tr '\n' ' ')
+# Installed automatically by:
+#   ./install.sh
+#   ./update.sh
+# Skip with:  TFF_SKIP_APT=1 ./update.sh
 #
-# Or let TFF tell you what's missing:
-#   tforensic deps
-#   curl -s http://127.0.0.1:8000/api/deps | python3 -m json.tool
+# Or manually:
+#   sudo apt install $(grep -vE '^\s*(#|$)' requirements-system.txt | tr '\n' ' ')
+#
+# Check what's missing:  tforensic deps
 
-# --- Disk / OVA ---
+# --- Required to open disk / OVA / E01 images ---
 xmount
 sleuthkit
 qemu-utils
@@ -28,6 +31,10 @@ samdump2
 
 # --- Optional carve ---
 testdisk
+
+# --- Python venv support (Kali PEP 668) ---
+python3-venv
+python3-full
 
 # --- Desktop (Electron) — Node 20/22 LTS recommended; see docs/DESKTOP.md ---
 # build-essential

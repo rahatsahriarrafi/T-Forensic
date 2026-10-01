@@ -1,6 +1,11 @@
 # Team Forensic Framework (TFF) — Python packages
-# Install:  pip install -r requirements.txt
-# System tools (xmount, sleuthkit, tshark, john, …): see requirements-system.txt
-# Check what's missing anytime:  tforensic deps
+# Install:  ./install.sh   or   ./scripts/install-python-reqs.sh
+# Update:   ./update.sh    (refreshes Python + system tools below)
+#
+# System tools required to OPEN disk/OVA/PCAP evidence (apt — not pip):
+#   see requirements-system.txt  →  installed by ./install.sh and ./update.sh
+#   Required for image open:  xmount  sleuthkit  qemu-utils  fuse3
+#   Also recommended:         tshark  john  hashcat  python3-libscca …
+# Check anytime:  tforensic deps
 
 impacket>=0.11.0,<1
