@@ -1,0 +1,6 @@
+# Team Forensic Framework (TFF) — Python packages
+# Install:  pip install -r requirements.txt
+# System tools (xmount, sleuthkit, tshark, john, …): see requirements-system.txt
+# Check what's missing anytime:  tforensic deps
+
+impacket>=0.11.0,<1

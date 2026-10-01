@@ -70,8 +70,15 @@ In the web/desktop UI, open the **Disk** tab to mount E01/raw/VDI/…, list part
 
 ```bash
 cd Project_T-Forensic
+python3 -m pip install -r requirements.txt
+# optional system tools (disk/PCAP/SAM/prefetch/…):
+#   sudo apt install $(grep -v '^#' requirements-system.txt | tr '\n' ' ')
+
 export PYTHONPATH="$PWD/engine"
 export PATH="$PWD/scripts:$PATH"
+
+# See what’s missing (prints install commands; exit 2 if incomplete)
+tforensic deps
 
 # AD1 logical image
 tforensic open /path/to/evidence.ad1
@@ -80,6 +87,9 @@ tforensic open /path/to/evidence.ad1
 tforensic open /path/to/disk.E01
 tforensic serve /path/to/disk.dd --port 8000
 ```
+
+The web UI also shows a **continuous missing-tools banner** (`/api/deps`) that
+refreshes every ~45s until packages are installed.
 
 Optional install as a package:
 

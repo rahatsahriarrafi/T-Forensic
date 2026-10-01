@@ -18,10 +18,13 @@ from tforensic.accessors import accessor_for, open_with_accessor  # noqa: E402
 class TestAccessors(unittest.TestCase):
     def test_ext_map(self):
         self.assertEqual(accessor_for("a/b/note.txt"), "text")
-        self.assertEqual(accessor_for("pic.PNG"), "image")
         self.assertEqual(accessor_for("data.json"), "json")
         self.assertEqual(accessor_for("app.exe"), "pe")
         self.assertEqual(accessor_for("hist.sqlite"), "sqlite")
+        self.assertEqual(accessor_for("Windows/System32/config/SAM"), "sam")
+
+    def test_png_exif_accessor(self):
+        self.assertEqual(accessor_for("pic.PNG"), "exif")
 
     def test_json_pretty(self):
         raw = json.dumps({"a": 1, "b": [2, 3]}).encode()
@@ -31,14 +34,15 @@ class TestAccessors(unittest.TestCase):
         self.assertIn("\n", r.text)
 
     def test_image_data_url(self):
-        # minimal 1x1 PNG
+        # minimal 1x1 PNG — routed via EXIF accessor (still embeds preview)
         png = (
             b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
             b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f"
             b"\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
         )
         r = open_with_accessor("dot.png", png)
-        self.assertEqual(r.mode, "image")
+        self.assertEqual(r.accessor, "exif")
+        self.assertEqual(r.mode, "table")
         self.assertTrue(r.data_url.startswith("data:image/png;base64,"))
 
     def test_zip_list(self):
@@ -67,7 +71,7 @@ class TestAccessors(unittest.TestCase):
             data = open(path, "rb").read()
             r = open_with_accessor("users.db", data)
             self.assertEqual(r.accessor, "sqlite")
-            self.assertEqual(r.mode, "table")
+            self.assertIn(r.mode, ("table", "sqlite-browser"))
             self.assertTrue(any(t["name"] == "users" for t in r.items))
             self.assertEqual(r.columns, ["id", "name"])
         finally:

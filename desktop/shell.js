@@ -313,6 +313,80 @@ function refitPty() {
   return size;
 }
 
+let lastSelected = null; // { path, name } from viewer iframe
+
+window.addEventListener("message", (ev) => {
+  const d = ev && ev.data;
+  if (!d || d.type !== "tff-selected") return;
+  if (d.path) lastSelected = { path: d.path, name: d.name || "" };
+});
+
+function getViewerSelection() {
+  // Always prefer live selection from the open tree
+  try {
+    const iframe = document.getElementById("viewer");
+    const sel = iframe && iframe.contentWindow && iframe.contentWindow.__tffGetSelection
+      ? iframe.contentWindow.__tffGetSelection()
+      : null;
+    if (sel && sel.path) {
+      lastSelected = { path: sel.path, name: sel.name || "" };
+      return lastSelected;
+    }
+  } catch (_) {}
+  if (lastSelected && lastSelected.path) return lastSelected;
+  return null;
+}
+
+/** Export the tree-selected file and cd the terminal to it (for exiftool, etc.). */
+async function terminalOpenSelectedFile() {
+  if (!caseUrl) {
+    window.tforensic.writeTerminal?.("[TFF] Open an image first");
+    return false;
+  }
+  const sel = getViewerSelection();
+  if (!sel || !sel.path) {
+    window.tforensic.writeTerminal?.(
+      "[TFF] No file selected — click a file in the Tree, then Sync / Open selected"
+    );
+    return false;
+  }
+  if (String(sel.path).startsWith("inode:")) {
+    window.tforensic.writeTerminal?.(
+      "[TFF] Disk inode selected — use Disk extract, then Sync again"
+    );
+    return false;
+  }
+  try {
+    window.tforensic.writeTerminal?.(
+      `[TFF] Loading selected file into terminal: ${sel.name || sel.path}`
+    );
+    const base = caseUrl.replace(/\/?$/, "/");
+    const res = await fetch(base + "api/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: sel.path }),
+    });
+    const d = await res.json();
+    if (d.error || !d.exported) {
+      window.tforensic.writeTerminal?.(
+        `[TFF] export failed: ${d.error || d.message || "unknown"}`
+      );
+      return false;
+    }
+    const file = d.exported;
+    const dir = file.replace(/[\\/][^\\/]+$/, "") || file;
+    // small delay so any prior shell cd finishes first
+    await new Promise((r) => setTimeout(r, 120));
+    window.tforensic.ptyCd?.(dir, file, sel.name || file.split(/[\\/]/).pop());
+    return true;
+  } catch (err) {
+    window.tforensic.writeTerminal?.(
+      `[TFF] could not open selection in terminal: ${err.message || err}`
+    );
+    return false;
+  }
+}
+
 async function toggleTerm() {
   const open = termWrap.classList.toggle("open");
   if (!open) return;
@@ -341,6 +415,10 @@ async function toggleTerm() {
     }
     window.tforensic.ptyStart(size || { cols: 80, rows: 24 });
     ptyStarted = true;
+    // Let the shell finish sourcing rc, then jump to selected file
+    setTimeout(() => { terminalOpenSelectedFile(); }, 700);
+  } else {
+    await terminalOpenSelectedFile();
   }
   window.tforensic.focusTerminal?.();
 }
@@ -350,15 +428,45 @@ document.getElementById("btn-term-close").onclick = (e) => {
   e.stopPropagation();
   termWrap.classList.remove("open");
 };
-document.getElementById("btn-term-sync").onclick = (e) => {
+document.getElementById("btn-term-sync").onclick = async (e) => {
   e.stopPropagation();
   if (!ptyStarted) {
-    toggleTerm();
+    await toggleTerm();
     return;
   }
-  window.tforensic.ptyResync?.();
+  // Refresh env, but do not cd away — then load the tree-selected file
+  try {
+    await window.tforensic.ptyResync?.({ skipCd: true });
+  } catch (_) {}
+  await new Promise((r) => setTimeout(r, 150));
+  const ok = await terminalOpenSelectedFile();
+  if (!ok) {
+    toast({
+      title: "Sync",
+      message: "Select a file in the Tree first, then click Sync.",
+      kind: "err",
+    });
+  } else {
+    toast({
+      title: "Synced",
+      message: "Selected file is ready in the terminal ($TFOR_FILE).",
+      kind: "ok",
+    });
+  }
   window.tforensic.focusTerminal?.();
 };
+const btnTermHere = document.getElementById("btn-term-here");
+if (btnTermHere) {
+  btnTermHere.onclick = async (e) => {
+    e.stopPropagation();
+    if (!termWrap.classList.contains("open") || !ptyStarted) {
+      await toggleTerm();
+      return;
+    }
+    await terminalOpenSelectedFile();
+    window.tforensic.focusTerminal?.();
+  };
+}
 
 window.tforensic.onPtyExit?.(() => {
   ptyStarted = false;

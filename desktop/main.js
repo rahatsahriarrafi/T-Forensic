@@ -526,7 +526,8 @@ function buildPtyRcFile(shellCtx) {
   } else {
     lines.push("echo 'Team Forensic Framework (TFF) — open an image to bind mounts (tfor-here)'");
   }
-  lines.push("echo 'Commands: tfor-here | tfor-parts | tfor-fls -o <start> | cdmount | cdexport'");
+  lines.push("echo 'Commands: tfor-here | cdimage | cdexport | cdlast | tfor-parts'");
+  lines.push("echo 'Copy/Paste: Ctrl+Shift+C / Ctrl+Shift+V  (right-click also works)'");
   fs.writeFileSync(tmp, `${lines.join("\n")}\n`);
   return tmp;
 }
@@ -589,6 +590,8 @@ ipcMain.on("pty-start", async (_event, size) => {
     let cwd = os.homedir();
     if (shellCtx && shellCtx.cwd && fs.existsSync(shellCtx.cwd)) {
       cwd = shellCtx.cwd;
+    } else if (shellCtx && shellCtx.image_dir && fs.existsSync(shellCtx.image_dir)) {
+      cwd = shellCtx.image_dir;
     } else if (shellCtx && shellCtx.shell_dir && fs.existsSync(shellCtx.shell_dir)) {
       cwd = shellCtx.shell_dir;
     } else if (sessionId) {
@@ -637,11 +640,12 @@ ipcMain.on("pty-resize", (_e, { cols, rows }) => {
 });
 
 /** Re-source session env into a live PTY (tree/mounts ↔ terminal). */
-ipcMain.on("pty-resync", async () => {
+ipcMain.handle("pty-resync", async (_event, opts) => {
   if (!ptyProcess) {
     sendToRenderer("pty-data", "\r\n\x1b[33m[no active terminal — open Terminal first]\x1b[0m\r\n");
-    return;
+    return { ok: false, error: "no-pty" };
   }
+  const skipCd = !!(opts && opts.skipCd);
   try {
     let shellCtx = null;
     if (engineUrl) {
@@ -664,27 +668,65 @@ ipcMain.on("pty-resync", async () => {
     const rc = shellCtx && shellCtx.rc_file;
     if (!rc || !fs.existsSync(rc)) {
       sendToRenderer("pty-data", "\r\n\x1b[33m[no shell context yet — open an image first]\x1b[0m\r\n");
-      return;
+      return { ok: false, error: "no-context" };
     }
     if (shellCtx.env) {
       for (const [k, v] of Object.entries(shellCtx.env)) {
         if (typeof v === "string") {
-          try { ptyProcess.write(`export ${k}=${shellQuote(v)}\n`); } catch (_) { return; }
+          try { ptyProcess.write(`export ${k}=${shellQuote(v)}\n`); } catch (_) { return { ok: false }; }
         }
       }
     }
     try {
       ptyProcess.write(`. ${shellQuote(rc)}\n`);
-      ptyProcess.write("echo \"[TFF] shell synced with current case — tfor-here\"\n");
-      if (shellCtx.cwd && fs.existsSync(shellCtx.cwd)) {
-        ptyProcess.write(`cd ${shellQuote(shellCtx.cwd)}\n`);
-      } else if (shellCtx.shell_dir && fs.existsSync(shellCtx.shell_dir)) {
-        ptyProcess.write(`cd ${shellQuote(shellCtx.shell_dir)}\n`);
+      ptyProcess.write("echo \"[TFF] shell synced with current case\"\n");
+      // skipCd: Sync will cd to the selected tree file next
+      if (!skipCd) {
+        if (shellCtx.cwd && fs.existsSync(shellCtx.cwd)) {
+          ptyProcess.write(`cd ${shellQuote(shellCtx.cwd)}\n`);
+        } else if (shellCtx.image_dir && fs.existsSync(shellCtx.image_dir)) {
+          ptyProcess.write(`cd ${shellQuote(shellCtx.image_dir)}\n`);
+        } else if (shellCtx.shell_dir && fs.existsSync(shellCtx.shell_dir)) {
+          ptyProcess.write(`cd ${shellQuote(shellCtx.shell_dir)}\n`);
+        }
       }
     } catch (_) {}
+    return { ok: true };
   } catch (err) {
     sendToRenderer("pty-data", `\r\n[resync failed: ${err.message}]\r\n`);
+    return { ok: false, error: String(err.message || err) };
   }
+});
+
+// Keep legacy send() callers working
+ipcMain.on("pty-resync", () => {
+  // no-op — use invoke; left for compatibility
+});
+
+ipcMain.on("pty-cd", (_e, payload) => {
+  if (!ptyProcess) return;
+  try {
+    const dir = payload && payload.dir;
+    const file = payload && payload.file;
+    const name = payload && payload.name;
+    if (dir && fs.existsSync(dir)) {
+      ptyProcess.write(`cd ${shellQuote(dir)}\n`);
+    }
+    if (file) {
+      ptyProcess.write(`export TFOR_FILE=${shellQuote(file)}\n`);
+      ptyProcess.write(`export TFOR_LAST_EXPORT=${shellQuote(file)}\n`);
+      ptyProcess.write(
+        `echo ${shellQuote(`[TFF] selected file ready → ${name || file}`)}\n`
+      );
+      ptyProcess.write(`echo ${shellQuote(`  path: ${file}`)}\n`);
+      ptyProcess.write(
+        `echo ${shellQuote("  try:  exiftool \"$TFOR_FILE\"   |   ls -la \"$TFOR_FILE\"")}\n`
+      );
+      ptyProcess.write(`ls -la ${shellQuote(file)}\n`);
+    } else if (dir) {
+      ptyProcess.write(`pwd; ls -la\n`);
+    }
+  } catch (_) {}
 });
 
 ipcMain.on("pty-kill", () => {

@@ -91,7 +91,21 @@ def build_shell_context(
         "TFOR_EXPORT": str(export_dir or root / "export"),
         "TFOR_IMAGE": str(image_path or ""),
         "TFOR_LAB": str(lab_dir or ""),
+        "TFOR_IMAGE_DIR": "",
     }
+
+    # Prefer opening the terminal in the folder that contains the evidence image
+    # so tools like exiftool / foremost can run next to the file.
+    image_dir = ""
+    if image_path:
+        ip = Path(image_path)
+        try:
+            if ip.exists():
+                image_dir = str(ip.resolve().parent)
+        except OSError:
+            image_dir = str(ip.parent) if ip.parent else ""
+    env["TFOR_IMAGE_DIR"] = image_dir
+    cwd = image_dir if image_dir and Path(image_dir).is_dir() else str(shell_dir)
 
     # Persist for external terminals
     (shell_dir / "env.sh").write_text(_env_sh(env, links), encoding="utf-8")
@@ -101,7 +115,8 @@ def build_shell_context(
                 "env": env,
                 "links": links,
                 "shell_dir": str(shell_dir),
-                "cwd": str(shell_dir),
+                "cwd": cwd,
+                "image_dir": image_dir,
                 "rc_file": str(shell_dir / "env.sh"),
             },
             indent=2,
@@ -112,19 +127,30 @@ def build_shell_context(
     banner_lines = [
         "Team Forensic Framework shell — mounted evidence access",
         f"  session: {session_id or '-'}  kind: {kind}",
+        f"  cwd:     {cwd}",
         f"  shell:   {shell_dir}",
     ]
+    if image_path:
+        banner_lines.append(f"  image:   {image_path}")
+    if image_dir:
+        banner_lines.append(f"  image dir (start here): {image_dir}")
     if mount_dir:
         banner_lines.append(f"  mount:   {mount_dir}")
     if virtual_device:
         banner_lines.append(f"  device:  {virtual_device}")
     banner_lines.append(f"  export:  {env['TFOR_EXPORT']}")
-    banner_lines.append("  tip:     cd $TFOR_SHELL && ls -la   |   tfor-here   |   tfor-parts")
+    banner_lines.append(
+        "  tip:     exiftool \"$TFOR_IMAGE\"  |  cdimage  |  cdexport  |  tfor-here"
+    )
+    banner_lines.append(
+        "  paste:   Ctrl+Shift+V  ·  copy: Ctrl+Shift+C (or right-click)"
+    )
     banner = "\n".join(banner_lines)
 
     return {
         "shell_dir": str(shell_dir),
-        "cwd": str(shell_dir),
+        "cwd": cwd,
+        "image_dir": image_dir,
         "env": env,
         "links": {k: v for k, v in links.items() if v},
         "banner": banner,
@@ -183,11 +209,14 @@ def _env_sh(env: dict[str, str], links: dict) -> str:
         "",
         "tfor-here() {",
         "  echo \"TFOR_SHELL=$TFOR_SHELL\"",
+        "  echo \"TFOR_IMAGE_DIR=$TFOR_IMAGE_DIR\"",
+        "  echo \"TFOR_IMAGE=$TFOR_IMAGE\"",
         "  echo \"TFOR_MOUNT=$TFOR_MOUNT\"",
         "  echo \"TFOR_DEVICE=$TFOR_DEVICE\"",
         "  echo \"TFOR_EXPORT=$TFOR_EXPORT\"",
         "  echo \"TFOR_LAB=$TFOR_LAB\"",
-        "  echo \"TFOR_IMAGE=$TFOR_IMAGE\"",
+        "  echo \"TFOR_LAST_EXPORT=${TFOR_LAST_EXPORT:-}\"",
+        "  pwd",
         "  ls -la \"${TFOR_SHELL:-.}\" 2>/dev/null || true",
         "}",
         "",
@@ -206,13 +235,27 @@ def _env_sh(env: dict[str, str], links: dict) -> str:
         "  icat \"$TFOR_DEVICE\" \"$@\"",
         "}",
         "",
+        "tfor-cd-image() { cd \"${TFOR_IMAGE_DIR:-$TFOR_SHELL}\" 2>/dev/null || cd \"$TFOR_SHELL\"; }",
         "tfor-cd-mount() { cd \"${TFOR_MOUNT:-$TFOR_SHELL/mount}\" 2>/dev/null || cd \"$TFOR_SHELL\"; }",
         "tfor-cd-export() { cd \"${TFOR_EXPORT:-$TFOR_SHELL/export}\" 2>/dev/null || true; }",
+        "tfor-cd-last() {",
+        "  local f=\"${TFOR_LAST_EXPORT:-}\"",
+        "  if [ -z \"$f\" ] && [ -f \"${TFOR_EXPORT}/.tff_last_export\" ]; then",
+        "    f=$(cat \"${TFOR_EXPORT}/.tff_last_export\" 2>/dev/null)",
+        "  fi",
+        "  if [ -n \"$f\" ] && [ -e \"$f\" ]; then cd \"$(dirname \"$f\")\"; pwd; ls -la \"$f\";",
+        "  else echo 'No last export yet — Export a file in the UI first.'; return 1; fi",
+        "}",
         "",
+        "alias cdimage='tfor-cd-image'",
         "alias cdmount='tfor-cd-mount'",
         "alias cdexport='tfor-cd-export'",
+        "alias cdlast='tfor-cd-last'",
         "",
-        "if [ -n \"${TFOR_SHELL}\" ] && [ -d \"${TFOR_SHELL}\" ]; then",
+        "# Start in the evidence image folder (for exiftool, etc.)",
+        "if [ -n \"${TFOR_IMAGE_DIR}\" ] && [ -d \"${TFOR_IMAGE_DIR}\" ]; then",
+        "  cd \"$TFOR_IMAGE_DIR\"",
+        "elif [ -n \"${TFOR_SHELL}\" ] && [ -d \"${TFOR_SHELL}\" ]; then",
         "  cd \"$TFOR_SHELL\"",
         "fi",
         "",

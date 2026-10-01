@@ -211,6 +211,73 @@ function notifyError(d, fallbackTitle) {
   });
 }
 
+let _depsHidden = false;
+let _depsTimer = null;
+
+function renderDepsBanner(report) {
+  const box = $("#deps-banner");
+  if (!box) return;
+  const missing = (report && report.missing) || [];
+  if (_depsHidden || !missing.length) {
+    box.hidden = true;
+    return;
+  }
+  const title = $("#deps-title");
+  const list = $("#deps-list");
+  if (title) {
+    title.textContent = `${missing.length} tool${missing.length === 1 ? "" : "s"} missing — install to unlock features`;
+  }
+  if (list) {
+    list.innerHTML = "";
+    missing.slice(0, 8).forEach((m) => {
+      const row = document.createElement("div");
+      row.className = "deps-row";
+      row.innerHTML =
+        `<div><b>${escapeHtml(m.name || m.id)}</b> — ${escapeHtml(m.feature || "")}</div>` +
+        `<code>${escapeHtml(m.suggestion || "")}</code>`;
+      list.appendChild(row);
+    });
+    const cmds = (((report || {}).install || {}).commands) || [];
+    if (cmds.length) {
+      const all = document.createElement("div");
+      all.className = "deps-row";
+      all.innerHTML = `<div><b>All at once</b></div><code>${escapeHtml(cmds[cmds.length - 1] || cmds[0])}</code>`;
+      list.appendChild(all);
+    }
+  }
+  box.hidden = false;
+}
+
+async function refreshDeps({ toastOnMissing } = {}) {
+  try {
+    const report = await api("/api/deps");
+    renderDepsBanner(report);
+    if (toastOnMissing && report && report.counts && report.counts.missing) {
+      const first = (report.missing || [])[0];
+      toast({
+        title: "Setup incomplete",
+        message: report.summary || `${report.counts.missing} tools missing`,
+        suggestion: (first && first.suggestion) || "Run: tforensic deps",
+        kind: "err",
+      });
+    }
+    return report;
+  } catch (_) {
+    return null;
+  }
+}
+
+function startDepsWatch() {
+  refreshDeps({ toastOnMissing: true });
+  if (_depsTimer) clearInterval(_depsTimer);
+  // Continuous: re-check every 45s so install suggestions clear once fulfilled
+  _depsTimer = setInterval(() => refreshDeps({ toastOnMissing: false }), 45000);
+  const btnR = $("#deps-refresh");
+  const btnD = $("#deps-dismiss");
+  if (btnR) btnR.onclick = () => { _depsHidden = false; refreshDeps({ toastOnMissing: true }); };
+  if (btnD) btnD.onclick = () => { _depsHidden = true; const b = $("#deps-banner"); if (b) b.hidden = true; };
+}
+
 const api = (p, opts) => fetch(p, opts).then(async (r) => {
   const ct = r.headers.get("content-type") || "";
   if (ct.includes("application/json")) {
@@ -237,6 +304,11 @@ const fmtSize = (n) => {
 };
 
 let selPath = null;
+let browseDir = null; // folder scope for grep / search
+let navHistory = [];  // previous paths for Back
+let navSuppress = false;
+let sqliteFilterFn = null; // active SQLite in-table filter hook
+let sqliteClearFilter = null;
 let curView = "text";
 
 function makeNode(node) {
@@ -375,13 +447,389 @@ async function loadInfo() {
   if (pill) pill.textContent = `session ${info.session_id}` + (kind === "disk" || kind === "ova" ? ` · ${kind}` : "");
 }
 
+function parentDirOf(path) {
+  if (!path) return null;
+  const p = String(path);
+  if (p.startsWith("inode:")) {
+    // inode:offset:inode:name → stay on partition folder part:offset
+    const parts = p.split(":");
+    if (parts.length >= 2) return `part:${parts[1]}`;
+    return null;
+  }
+  const i = p.lastIndexOf("/");
+  if (i <= 0) return p.includes("/") ? "/" : null;
+  return p.slice(0, i) || "/";
+}
+
+function updateNavChrome() {
+  const back = $("#btn-nav-back");
+  const grep = $("#btn-folder-grep");
+  const search = $("#search");
+  const insideQ = $("#inside-q");
+  const scopeEl = $("#inside-scope");
+  if (back) back.disabled = navHistory.length === 0;
+  if (grep) grep.disabled = false;
+  if (search) {
+    search.classList.remove("scoped");
+    search.placeholder = "Search whole image — Enter / Search…";
+  }
+  let scopeLabel = "current folder / view";
+  let insidePh = "Inside — current folder or view…";
+  if (sqliteFilterFn && document.querySelector(".sqlite-browser")) {
+    scopeLabel = "this SQLite table";
+    insidePh = "Inside — filter this table…";
+  } else if (browseDir) {
+    scopeLabel = browseDir.length > 36 ? "…" + browseDir.slice(-34) : browseDir;
+    insidePh = "Inside — this folder (name + content)…";
+  } else if (selPath) {
+    scopeLabel = "parent folder / image";
+    insidePh = "Inside — nearby folder or image…";
+  }
+  if (insideQ) insideQ.placeholder = insidePh;
+  if (scopeEl) {
+    scopeEl.textContent = scopeLabel;
+    scopeEl.title = browseDir || selPath || "folder / view";
+  }
+}
+
+function focusEl(el, caret) {
+  if (!el) return;
+  requestAnimationFrame(() => {
+    el.focus();
+    try {
+      const n = typeof caret === "number" ? caret : el.value.length;
+      el.setSelectionRange(n, n);
+    } catch (_) {}
+  });
+}
+
+/** Top bar: always whole-image search (never folder/table scoped). */
+function submitGlobalSearch() {
+  const s = $("#search");
+  const q = (s && s.value.trim()) || "";
+  const caret = s && typeof s.selectionStart === "number" ? s.selectionStart : null;
+  const done = runGlobalSearch(q);
+  Promise.resolve(done).finally(() => focusEl(s, caret));
+}
+
+/** Below INSIDE bar: SQLite table / current folder / nearby scope. */
+function submitInsideSearch() {
+  const s = $("#inside-q") || $("#search");
+  const q = (($("#inside-q") && $("#inside-q").value.trim()) || "");
+  const caret = s && typeof s.selectionStart === "number" ? s.selectionStart : null;
+  if (sqliteFilterFn && document.querySelector(".sqlite-browser")) {
+    runSearch(q); // filters open table
+    focusEl($("#inside-q"), caret);
+    return;
+  }
+  const done = q ? runFolderGrep(q) : Promise.resolve();
+  Promise.resolve(done).finally(() => focusEl($("#inside-q"), caret));
+}
+
+function setDetailHead(path, name) {
+  const head = $("#detail-head");
+  if (!head) return;
+  head.innerHTML =
+    `<div class="detail-head-row">` +
+    `<div><div class="path">${escapeHtml(path)}</div>` +
+    `<div class="sub">${escapeHtml(name || "")}` +
+    (browseDir ? ` · folder scope: <code>${escapeHtml(browseDir)}</code>` : "") +
+    `</div></div>` +
+    `<div class="detail-head-actions">` +
+    `<button type="button" id="btn-head-back" ${navHistory.length ? "" : "disabled"}>← Back</button>` +
+    `<button type="button" id="btn-head-grep">Inside search</button>` +
+    `</div></div>`;
+  const hb = $("#btn-head-back");
+  const hg = $("#btn-head-grep");
+  if (hb) hb.onclick = () => goBack();
+  if (hg) hg.onclick = () => {
+    const iq = $("#inside-q");
+    if (iq) {
+      iq.focus();
+      if (!iq.value.trim()) promptFolderGrep();
+      else submitInsideSearch();
+    } else {
+      promptFolderGrep();
+    }
+  };
+  updateNavChrome();
+}
+
+async function goBack() {
+  if (!navHistory.length) return;
+  const prev = navHistory.pop();
+  navSuppress = true;
+  updateNavChrome();
+  await selectFile(prev, null);
+  navSuppress = false;
+  updateNavChrome();
+}
+
+function promptFolderGrep() {
+  const iq = $("#inside-q");
+  const q = (iq && iq.value.trim()) || "";
+  if (sqliteFilterFn && document.querySelector(".sqlite-browser")) {
+    const term = q || window.prompt("Inside search — this SQLite table:", "") || "";
+    if (iq) iq.value = term;
+    sqliteFilterFn(String(term).trim());
+    focusEl(iq);
+    return;
+  }
+  const term = q || window.prompt("Inside search (current folder):", "");
+  if (term == null) return;
+  const t = String(term).trim();
+  if (!t) return;
+  if (iq) iq.value = t;
+  runFolderGrep(t);
+}
+
+/** Whole-image filename search — ignores folder / SQLite scope. */
+async function runGlobalSearch(q) {
+  if (!q) {
+    hideHitPanel();
+    return;
+  }
+  await withBusy("Searching whole image…", async () => {
+    const d = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    const items = (d.results || []).map((r) => ({
+      name: r.name,
+      path: r.path,
+      htmlName: highlightTerm(r.name || "", q),
+      is_dir: !!r.is_dir,
+      size: r.size,
+    }));
+    showHitPanel({
+      title: "Whole-image matches",
+      sub: `${d.count || 0} hits across the image (tree kept open)`,
+      items,
+      onPick: (it) => selectFile(it.path, null),
+    });
+  }, { title: "Search whole image", message: q, overlayDelay: 80 });
+}
+
+async function runSearch(q) {
+  if (!q) {
+    hideHitPanel();
+    if (sqliteClearFilter) sqliteClearFilter();
+    return;
+  }
+  // Inside path: SQLite table filter only (top bar never calls this for global)
+  if (sqliteFilterFn && document.querySelector(".sqlite-browser")) {
+    sqliteFilterFn(q);
+    return;
+  }
+  const under = browseDir;
+  const url = under
+    ? `/api/search?q=${encodeURIComponent(q)}&under=${encodeURIComponent(under)}`
+    : `/api/search?q=${encodeURIComponent(q)}`;
+  await withBusy(under ? "Searching folder…" : "Searching…", async () => {
+    const d = await api(url);
+    const items = (d.results || []).map((r) => ({
+      name: r.name,
+      path: r.path,
+      htmlName: highlightTerm(r.name || "", q),
+      is_dir: !!r.is_dir,
+      size: r.size,
+    }));
+    showHitPanel({
+      title: under ? "Folder matches" : "Filename matches",
+      sub: under
+        ? `${d.count || 0} hits under ${under} (tree kept open)`
+        : `${d.count || 0} hits in image (tree kept open)`,
+      items,
+      onPick: (it) => selectFile(it.path, null),
+    });
+  }, { title: "Search", message: q, overlayDelay: 80 });
+}
+
+async function runFolderGrep(q) {
+  if (!q) return;
+  if (sqliteFilterFn && document.querySelector(".sqlite-browser")) {
+    sqliteFilterFn(q);
+    return;
+  }
+  const under = browseDir || parentDirOf(selPath) || null;
+  await withBusy(under ? "Inside search…" : "Inside search (image)…", async () => {
+    const url = under
+      ? `/api/grep?q=${encodeURIComponent(q)}&under=${encodeURIComponent(under)}`
+      : `/api/grep?q=${encodeURIComponent(q)}`;
+    const d = await api(url);
+    if (d.error) {
+      notifyError(d);
+      return;
+    }
+    const items = (d.hits || []).map((h) => ({
+      name: h.name,
+      path: h.path,
+      snippet: h.snippet,
+      htmlName: (h.kind === "content" ? "⌕ " : "") + highlightTerm(h.name || "", q),
+      htmlSnippet: h.snippet ? highlightTerm(h.snippet, q) : "",
+      kind: h.kind,
+    }));
+    showHitPanel({
+      title: "Inside search results",
+      sub: under
+        ? `“${q}” in ${under} · ${d.count || 0} hits · tree unchanged`
+        : `“${q}” · ${d.count || 0} hits · tree unchanged`,
+      items,
+      onPick: (it) => selectFile(it.path, null),
+    });
+  }, { title: "Inside search", message: under || "image", overlayDelay: 80 });
+}
+
+function formatAd1Timestamp(raw) {
+  const m = String(raw || "").trim().match(
+    /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(?:\.(\d+))?$/
+  );
+  if (!m) return null;
+  return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]} UTC`;
+}
+
+const AD1_ATTR_NAMES = {
+  2: "Item type",
+  3: "Logical size",
+  4: "Physical size",
+  7: "Accessed",
+  8: "Modified",
+  9: "Created",
+  13: "Compressed",
+  14: "Encrypted",
+  30: "Has integrity hash",
+  4097: "DOS 8.3 name",
+  4098: "Is directory",
+  4099: "Is deleted",
+  4100: "Is unused",
+  4101: "Is allocated",
+  20481: "MD5",
+  20482: "SHA-1",
+  40961: "MFT entry",
+  40962: "MFT modified",
+  40963: "NTFS in use",
+  40964: "NTFS directory",
+  40965: "NTFS deleted flag",
+  40966: "NTFS unused flag",
+  40967: "Owner SID",
+  40968: "Owner name",
+  40969: "Group SID",
+  40970: "Group name",
+  40988: "SI Created",
+  40989: "SI Modified",
+  40990: "SI MFT changed",
+  40991: "SI Accessed",
+  41000: "File name",
+  41001: "FN logical size",
+  41002: "FN physical size",
+  41003: "FN Created",
+  41004: "FN Modified",
+  41005: "FN MFT changed",
+  41006: "FN Accessed",
+  41007: "FN DOS name",
+};
+
+function ad1AttrLabel(key) {
+  const k = +key;
+  if (Number.isFinite(k) && AD1_ATTR_NAMES[k]) return AD1_ATTR_NAMES[k];
+  if (Number.isFinite(k) && k >= 0x01000000) {
+    const slot = Math.floor((k - 0x01000000) / 0x1000);
+    const field = (k - 0x01000000) % 0x1000;
+    const fields = {
+      4: "ACE SID",
+      5: "ACE account",
+      6: "ACE access mask",
+      7: "ACE: read",
+      8: "ACE: write",
+      9: "ACE: execute",
+      10: "ACE: delete",
+    };
+    return `ACL[${slot}] ${fields[field] || ("field " + field)}`;
+  }
+  return Number.isFinite(k) ? `Attribute ${k}` : String(key);
+}
+
+function formatMetaRows(attrs, serverRows) {
+  if (serverRows && serverRows.length) return serverRows;
+  return Object.entries(attrs || {}).map(([k, v]) => {
+    const raw = v == null ? "" : String(v);
+    const ts = formatAd1Timestamp(raw);
+    let kind = "text";
+    if (ts) kind = "time";
+    else if (raw.startsWith("S-1-")) kind = "sid";
+    else if (/^[0-9a-fA-F]{32}$/.test(raw) || /^[0-9a-fA-F]{40}$/.test(raw)) kind = "hash";
+    else if (/^(true|false)$/i.test(raw)) kind = "bool";
+    return {
+      key: String(k),
+      label: ad1AttrLabel(k),
+      raw,
+      display: ts ? `${ts}  |  ${raw}` : raw,
+      kind,
+    };
+  }).sort((a, b) => {
+    const p = { time: 0, sid: 1, hash: 2, text: 3, bool: 4 };
+    return (p[a.kind] ?? 9) - (p[b.kind] ?? 9) || a.label.localeCompare(b.label);
+  });
+}
+
+function renderMetaTable(d, body) {
+  body.innerHTML = "";
+  if (d.recycle && d.recycle.deleted_utc) {
+    const box = document.createElement("div");
+    box.className = "meta-highlight";
+    box.innerHTML =
+      `<div class="mh-title">Recycle Bin — deleted file</div>` +
+      `<div class="mh-row"><span class="k">Deleted (UTC)</span>` +
+      `<span class="v timeish">${escapeHtml(d.recycle.deleted_utc)}</span></div>` +
+      `<div class="mh-row"><span class="k">Original path</span>` +
+      `<span class="v">${escapeHtml(d.recycle.original_path || "")}</span></div>` +
+      `<div class="mh-row"><span class="k">Original size</span>` +
+      `<span class="v">${escapeHtml(String(d.recycle.original_size ?? ""))}</span></div>`;
+    body.appendChild(box);
+  }
+  const rows = formatMetaRows(d.attrs, d.rows);
+  if (!rows.length) {
+    body.innerHTML += `<pre class="muted">no metadata</pre>`;
+    return;
+  }
+  const hint = document.createElement("div");
+  hint.className = "meta-hint";
+  hint.textContent = "Readable metadata · times in UTC · hover row for full value · ACL = permission entries";
+  body.appendChild(hint);
+  const table = document.createElement("table");
+  table.className = "meta meta-readable";
+  table.innerHTML = "<tr><th>Field</th><th>Value</th><th class=\"dim\">ID</th></tr>";
+  rows.forEach((r) => {
+    const tr = document.createElement("tr");
+    tr.className = "meta-" + (r.kind || "text");
+    const val = r.display || r.raw || "";
+    tr.innerHTML =
+      `<td class="k">${escapeHtml(r.label || r.key)}</td>` +
+      `<td class="v" title="${escapeHtml(r.raw || val)}">${escapeHtml(val)}</td>` +
+      `<td class="dim" title="${escapeHtml(r.key)}">${escapeHtml(r.key)}</td>`;
+    table.appendChild(tr);
+  });
+  body.appendChild(table);
+}
+
 async function selectFile(path, rowEl) {
+  if (!navSuppress && selPath && selPath !== path) {
+    navHistory.push(selPath);
+    if (navHistory.length > 40) navHistory.shift();
+  }
   selPath = path;
+  browseDir = parentDirOf(path);
+  updateNavChrome();
   document.querySelectorAll(".node.sel").forEach((e) => e.classList.remove("sel"));
   if (rowEl) rowEl.classList.add("sel");
   const name = path.split("/").pop() || path.split(":").pop() || path;
-  $("#detail-head").innerHTML =
-    `<div class="path">${escapeHtml(path)}</div><div class="sub">${escapeHtml(name)}</div>`;
+  // Tell desktop shell which file is selected (for Terminal → open here)
+  try {
+    window.parent.postMessage({
+      type: "tff-selected",
+      path,
+      name,
+      isDir: false,
+    }, "*");
+  } catch (_) {}
+  setDetailHead(path, name);
   const dl = $("#dl");
   const isDiskInode = String(path).startsWith("inode:");
   if (dl) {
@@ -399,6 +847,10 @@ async function renderView(view) {
   document.querySelectorAll(".dtab[data-view]").forEach((b) =>
     b.classList.toggle("active", b.dataset.view === view));
   if (!selPath) return;
+  // Leaving a previous SQLite preview — drop in-table filter hooks
+  sqliteFilterFn = null;
+  sqliteClearFilter = null;
+  updateNavChrome();
   const body = $("#detail-body");
   const label = view === "hex" ? "Hex view" : view === "meta" ? "Metadata" : view === "hash" ? "Hashes" : "Preview";
   body.innerHTML = loadingHtml(label + "…", selPath);
@@ -428,15 +880,7 @@ async function renderView(view) {
         notifyError(d);
         return;
       }
-      const rows = Object.entries(d.attrs || {})
-        .map(([k, v]) => {
-          const hk = Number.isFinite(+k) ? "0x" + (+k).toString(16) : k;
-          return `<tr><td class="k">${escapeHtml(hk)}</td><td>${escapeHtml(v)}</td></tr>`;
-        })
-        .join("");
-      body.innerHTML = rows
-        ? `<table class="meta">${rows}</table>`
-        : `<pre class="muted">no metadata</pre>`;
+      renderMetaTable(d, body);
       return;
     }
     if (view === "hash") {
@@ -455,6 +899,506 @@ async function renderView(view) {
     body.innerHTML = errHtml({ error: String(e.message || e), title: "Load failed" });
   } finally {
     endWork();
+  }
+}
+
+function hideCellPop() {
+  const pop = $("#sqlite-cell-pop");
+  if (pop) pop.hidden = true;
+}
+
+function showCellPop(col, text) {
+  let pop = $("#sqlite-cell-pop");
+  if (!pop) {
+    pop = document.createElement("div");
+    pop.id = "sqlite-cell-pop";
+    pop.className = "sqlite-cell-pop";
+    pop.hidden = true;
+    pop.innerHTML =
+      `<div class="scp-card">` +
+      `<div class="scp-head"><strong id="scp-title">Cell</strong>` +
+      `<div class="scp-actions">` +
+      `<button type="button" id="scp-copy">Copy</button>` +
+      `<button type="button" id="scp-close">Close</button>` +
+      `</div></div>` +
+      `<pre class="scp-body" id="scp-body"></pre></div>`;
+    document.body.appendChild(pop);
+    pop.addEventListener("click", (e) => {
+      if (e.target === pop) hideCellPop();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") hideCellPop();
+    });
+  }
+  const tit = $("#scp-title");
+  const body = $("#scp-body");
+  const copyBtn = $("#scp-copy");
+  const closeBtn = $("#scp-close");
+  if (tit) tit.textContent = col || "Full value";
+  if (body) body.textContent = text == null ? "" : String(text);
+  if (copyBtn) {
+    copyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(String(text ?? ""));
+        toast({ title: "Copied", message: col || "cell", kind: "ok" });
+      } catch (_) {
+        // fallback select
+        if (body) {
+          const range = document.createRange();
+          range.selectNodeContents(body);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }
+    };
+  }
+  if (closeBtn) closeBtn.onclick = () => hideCellPop();
+  pop.hidden = false;
+}
+
+function highlightTerm(text, term) {
+  const s = String(text ?? "");
+  if (!term) return escapeHtml(s);
+  const t = String(term);
+  const low = s.toLowerCase();
+  const needle = t.toLowerCase();
+  let out = "";
+  let i = 0;
+  while (i < s.length) {
+    const j = low.indexOf(needle, i);
+    if (j < 0) {
+      out += escapeHtml(s.slice(i));
+      break;
+    }
+    out += escapeHtml(s.slice(i, j));
+    out += `<mark class="hit">${escapeHtml(s.slice(j, j + t.length))}</mark>`;
+    i = j + t.length;
+  }
+  return out;
+}
+
+function showHitPanel({ title, sub, items, onPick }) {
+  const panel = $("#hit-panel");
+  const list = $("#hit-list");
+  const tit = $("#hit-title");
+  const subEl = $("#hit-sub");
+  if (!panel || !list) return;
+  if (tit) tit.textContent = title || "Search results";
+  if (subEl) subEl.textContent = sub || "";
+  list.innerHTML = "";
+  if (!items || !items.length) {
+    list.innerHTML = `<pre class="muted" style="padding:12px">No matches.</pre>`;
+  } else {
+    items.forEach((it) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "hit-item";
+      btn.innerHTML =
+        `<div class="hn">${it.htmlName || escapeHtml(it.name || it.path || "")}</div>` +
+        (it.path ? `<div class="hp">${escapeHtml(it.path)}</div>` : "") +
+        (it.snippet ? `<div class="hs">${it.htmlSnippet || escapeHtml(it.snippet)}</div>` : "");
+      btn.onclick = () => {
+        panel.hidden = true;
+        if (onPick) onPick(it);
+      };
+      list.appendChild(btn);
+    });
+  }
+  panel.hidden = false;
+}
+
+function hideHitPanel() {
+  const panel = $("#hit-panel");
+  if (panel) panel.hidden = true;
+}
+
+function renderSqliteBrowser(d, body) {
+  const wrap = document.createElement("div");
+  wrap.className = "sqlite-browser";
+
+  const tables = d.tables || d.items || [];
+  let active = d.active_table || (tables[0] && (tables[0].name || tables[0])) || null;
+  let offset = 0;
+  const limit = 100;
+  let lastPayload = null;
+  let filterTerm = "";
+
+  const side = document.createElement("div");
+  side.className = "sqlite-side";
+  const main = document.createElement("div");
+  main.className = "sqlite-main";
+  wrap.appendChild(side);
+  wrap.appendChild(main);
+  body.appendChild(wrap);
+
+  const title = document.createElement("div");
+  title.className = "sqlite-side-title";
+  title.textContent = `Tables (${tables.length})`;
+  side.appendChild(title);
+
+  const list = document.createElement("div");
+  list.className = "sqlite-table-list";
+  side.appendChild(list);
+
+  function formatTimeCell(text, term) {
+    // "HUMAN  |  kind:RAW"
+    const m = String(text).match(
+      /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC)\s+\|\s+((?:webkit|unix(?:-ms|-us)?):\d+)$/
+    );
+    if (!m) return null;
+    const human = term ? highlightTerm(m[1], term) : escapeHtml(m[1]);
+    const raw = term ? highlightTerm(m[2], term) : escapeHtml(m[2]);
+    return `<span class="t-human">${human}</span>` +
+      `<span class="t-raw">| ${raw}</span>`;
+  }
+
+  function paintRows(payload, opts = {}) {
+    const activeEl = document.activeElement;
+    const keepTopSearch = activeEl && activeEl.id === "search";
+    const keepInside = activeEl && activeEl.id === "inside-q";
+    const keepFilter =
+      !!opts.focusFilter ||
+      (activeEl && activeEl.closest && activeEl.closest(".sqlite-filter-bar"));
+    const caret =
+      opts.caret != null
+        ? opts.caret
+        : activeEl && typeof activeEl.selectionStart === "number"
+          ? activeEl.selectionStart
+          : null;
+
+    lastPayload = payload;
+    main.innerHTML = "";
+    const filterBar = document.createElement("div");
+    filterBar.className = "sqlite-filter-bar";
+    const fin = document.createElement("input");
+    fin.type = "search";
+    fin.placeholder = "Inside table — Enter searches ALL rows (try @ or proton)…";
+    fin.value = filterTerm;
+    const countEl = document.createElement("span");
+    countEl.className = "hit-count";
+    filterBar.appendChild(fin);
+    // Quick chips for common forensic hunts (Q6 email / mail)
+    const chips = document.createElement("div");
+    chips.className = "sqlite-chips";
+    [
+      ["@", "Emails (@)"],
+      ["proton", "ProtonMail"],
+      ["mail", "mail"],
+      ["http", "http"],
+    ].forEach(([term, label]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "sqlite-chip";
+      b.textContent = label;
+      b.title = `Search whole table for “${term}”`;
+      b.onclick = () => {
+        filterTerm = term;
+        if ($("#inside-q")) $("#inside-q").value = term;
+        searchEntireTable(term);
+      };
+      chips.appendChild(b);
+    });
+    filterBar.appendChild(chips);
+    filterBar.appendChild(countEl);
+    main.appendChild(filterBar);
+
+    const bar = document.createElement("div");
+    bar.className = "sqlite-toolbar";
+    const total = payload.total != null ? payload.total : "?";
+    const isSearch = payload.mode === "search" || !!payload.search;
+    const end = isSearch
+      ? payload.returned
+      : payload.offset + payload.returned;
+    bar.innerHTML =
+      `<strong>${escapeHtml(payload.table || active || "")}</strong>` +
+      `<span class="muted">${isSearch
+        ? `${payload.returned} match${payload.returned === 1 ? "" : "es"} for “${escapeHtml(payload.search || filterTerm)}” · of ${total}`
+        : `${payload.returned} rows · ${payload.offset + 1}–${end} of ${total}`}</span>`;
+    const prev = document.createElement("button");
+    prev.type = "button";
+    prev.textContent = "◀ Prev";
+    prev.disabled = isSearch || offset <= 0;
+    prev.onclick = () => {
+      offset = Math.max(0, offset - limit);
+      loadTable(active);
+    };
+    const next = document.createElement("button");
+    next.type = "button";
+    next.textContent = "Next ▶";
+    next.disabled = isSearch || (payload.total != null
+      ? offset + limit >= payload.total
+      : payload.returned < limit);
+    next.onclick = () => {
+      offset += limit;
+      loadTable(active);
+    };
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.textContent = "Clear search";
+    clearBtn.disabled = !isSearch && !filterTerm;
+    clearBtn.onclick = () => {
+      filterTerm = "";
+      if ($("#inside-q")) $("#inside-q").value = "";
+      offset = 0;
+      loadTable(active);
+    };
+    const schemaBtn = document.createElement("button");
+    schemaBtn.type = "button";
+    schemaBtn.textContent = "Schema";
+    schemaBtn.onclick = () => showSchema(active);
+    bar.appendChild(prev);
+    bar.appendChild(next);
+    bar.appendChild(clearBtn);
+    bar.appendChild(schemaBtn);
+    main.appendChild(bar);
+
+    if (!payload.columns || !payload.columns.length) {
+      const empty = document.createElement("pre");
+      empty.className = "muted";
+      empty.textContent = "No columns / empty table.";
+      main.appendChild(empty);
+      return;
+    }
+    const table = document.createElement("table");
+    table.className = "meta data sqlite-grid";
+    const thead = document.createElement("tr");
+    payload.columns.forEach((c) => {
+      const th = document.createElement("th");
+      th.textContent = c;
+      thead.appendChild(th);
+    });
+    table.appendChild(thead);
+
+    const term = filterTerm.trim();
+    const termL = term.toLowerCase();
+    let hitCount = 0;
+    (payload.rows || []).forEach((row) => {
+      const rowText = row.map((c) => (c == null ? "" : String(c))).join(" ").toLowerCase();
+      const isHit = termL && rowText.includes(termL);
+      if (isHit) hitCount += 1;
+      // When filtering, hide non-matches; when empty filter, show all
+      if (termL && !isHit) return;
+      const tr = document.createElement("tr");
+      if (isHit) tr.classList.add("hit-row");
+      row.forEach((cell, i) => {
+        const td = document.createElement("td");
+        const text = cell == null ? "NULL" : String(cell);
+        const timeHtml = formatTimeCell(text, termL ? term : "");
+        if (cell == null) {
+          td.className = "null";
+          td.textContent = "NULL";
+        } else if (text.startsWith("BLOB(")) {
+          td.className = "blob";
+          td.innerHTML = termL ? highlightTerm(text, term) : escapeHtml(text);
+        } else if (timeHtml) {
+          td.className = "timeish";
+          td.innerHTML = timeHtml;
+        } else {
+          const colL = ((payload.columns || [])[i] || "").toLowerCase();
+          if (colL.includes("url") || colL.includes("title") || colL.includes("path") || text.length > 48) {
+            td.classList.add("wide-col");
+          }
+          td.innerHTML = termL ? highlightTerm(text, term) : escapeHtml(text);
+        }
+        const col = (payload.columns || [])[i] || "";
+        const full = cell == null ? "NULL" : String(cell);
+        td.title = full;
+        td.onclick = (e) => {
+          e.stopPropagation();
+          document.querySelectorAll(".sqlite-grid td.cell-open").forEach((x) => x.classList.remove("cell-open"));
+          td.classList.add("cell-open");
+          showCellPop(col, full);
+        };
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    countEl.textContent = termL
+      ? (payload.mode === "search"
+        ? `${payload.returned} in whole table (red)`
+        : `${hitCount} on this page (red)`)
+      : "";
+    const scroller = document.createElement("div");
+    scroller.className = "sqlite-scroll";
+    scroller.appendChild(table);
+    main.appendChild(scroller);
+
+    fin.onkeydown = (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      filterTerm = fin.value.trim();
+      if ($("#inside-q")) $("#inside-q").value = filterTerm;
+      if (!filterTerm) {
+        offset = 0;
+        loadTable(active);
+        return;
+      }
+      searchEntireTable(filterTerm);
+    };
+    fin.oninput = () => {
+      /* value only; Enter runs whole-table search */
+    };
+
+    if (keepTopSearch) {
+      focusEl($("#search"), caret);
+    } else if (keepInside) {
+      focusEl($("#inside-q"), caret);
+    } else if (keepFilter) {
+      fin.focus();
+      try {
+        const pos = caret != null ? caret : fin.value.length;
+        fin.setSelectionRange(pos, pos);
+      } catch (_) {}
+    }
+  }
+
+  async function searchEntireTable(term) {
+    if (!selPath || !active) return;
+    const t = String(term || "").trim();
+    filterTerm = t;
+    main.innerHTML = loadingHtml("Searching table…", t || active);
+    try {
+      const pe = encodeURIComponent(selPath);
+      const te = encodeURIComponent(active);
+      const payload = await api(
+        `/api/sqlite/search?path=${pe}&table=${te}&q=${encodeURIComponent(t)}&limit=300`
+      );
+      if (payload.error) {
+        main.innerHTML = errHtml(payload);
+        return;
+      }
+      paintRows(payload, { focusFilter: true });
+    } catch (e) {
+      main.innerHTML = errHtml({ error: String(e.message || e), title: "SQLite search failed" });
+    }
+  }
+
+  sqliteFilterFn = (term) => {
+    filterTerm = term || "";
+    if (!filterTerm) {
+      if (sqliteClearFilter) sqliteClearFilter();
+      return;
+    }
+    searchEntireTable(filterTerm);
+  };
+  sqliteClearFilter = () => {
+    filterTerm = "";
+    offset = 0;
+    if (active) loadTable(active);
+  };
+  updateNavChrome();
+
+  async function showSchema(tableName) {
+    if (!selPath || !tableName) return;
+    main.innerHTML = loadingHtml("Schema…", tableName);
+    try {
+      const pe = encodeURIComponent(selPath);
+      const te = encodeURIComponent(tableName);
+      const s = await api(`/api/sqlite/schema?path=${pe}&table=${te}`);
+      if (s.error) {
+        main.innerHTML = errHtml(s);
+        return;
+      }
+      main.innerHTML = "";
+      const bar = document.createElement("div");
+      bar.className = "sqlite-toolbar";
+      bar.innerHTML = `<strong>Schema · ${escapeHtml(tableName)}</strong>`;
+      const back = document.createElement("button");
+      back.type = "button";
+      back.textContent = "← Rows";
+      back.onclick = () => loadTable(tableName);
+      bar.appendChild(back);
+      main.appendChild(bar);
+      const meta = document.createElement("table");
+      meta.className = "meta data";
+      meta.innerHTML = "<tr><th>#</th><th>Column</th><th>Type</th><th>PK</th><th>NotNull</th><th>Default</th></tr>";
+      (s.columns || []).forEach((c) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          `<td>${c.cid}</td><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.type || "")}</td>` +
+          `<td>${c.pk ? "✓" : ""}</td><td>${c.notnull ? "✓" : ""}</td>` +
+          `<td>${escapeHtml(c.default == null ? "" : String(c.default))}</td>`;
+        meta.appendChild(tr);
+      });
+      main.appendChild(meta);
+      if (s.sql) {
+        const pre = document.createElement("pre");
+        pre.className = "sqlite-sql";
+        pre.textContent = s.sql;
+        main.appendChild(pre);
+      }
+    } catch (e) {
+      main.innerHTML = errHtml({ error: String(e.message || e), title: "Schema failed" });
+    }
+  }
+
+  async function loadTable(tableName) {
+    if (!selPath || !tableName) {
+      main.innerHTML = `<pre class="muted">No tables in this database.</pre>`;
+      return;
+    }
+    active = tableName;
+    list.querySelectorAll(".sqlite-t").forEach((el) => {
+      el.classList.toggle("sel", el.dataset.name === tableName);
+    });
+    main.innerHTML = loadingHtml("Reading table…", tableName);
+    try {
+      const pe = encodeURIComponent(selPath);
+      const te = encodeURIComponent(tableName);
+      const payload = await api(
+        `/api/sqlite/rows?path=${pe}&table=${te}&offset=${offset}&limit=${limit}`
+      );
+      if (payload.error) {
+        main.innerHTML = errHtml(payload);
+        return;
+      }
+      paintRows(payload);
+    } catch (e) {
+      main.innerHTML = errHtml({ error: String(e.message || e), title: "SQLite browse failed" });
+    }
+  }
+
+  if (!tables.length) {
+    side.innerHTML += `<pre class="muted">No tables/views</pre>`;
+    main.innerHTML = `<pre class="muted">${escapeHtml(d.note || "Empty SQLite database.")}</pre>`;
+    return;
+  }
+
+  tables.forEach((t) => {
+    const name = typeof t === "string" ? t : t.name;
+    const typ = typeof t === "string" ? "table" : (t.type || "table");
+    const count = typeof t === "object" && t.row_count != null ? ` · ${t.row_count}` : "";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sqlite-t";
+    btn.dataset.name = name;
+    btn.innerHTML =
+      `<span class="tn">${escapeHtml(name)}</span>` +
+      `<span class="tt">${escapeHtml(typ)}${escapeHtml(count)}</span>`;
+    btn.onclick = () => {
+      offset = 0;
+      loadTable(name);
+    };
+    list.appendChild(btn);
+  });
+
+  // Prefer server sample if present for first paint, else fetch
+  if (d.columns && d.rows && active) {
+    paintRows({
+      table: active,
+      columns: d.columns,
+      rows: d.rows,
+      offset: 0,
+      limit: d.rows.length,
+      returned: d.rows.length,
+      total: null,
+    });
+    list.querySelectorAll(".sqlite-t").forEach((el) => {
+      el.classList.toggle("sel", el.dataset.name === active);
+    });
+  } else {
+    loadTable(active);
   }
 }
 
@@ -498,33 +1442,72 @@ function renderAccessor(d, body) {
     return;
   }
 
-  if (d.mode === "table") {
-    if (d.items && d.items.length) {
-      const list = document.createElement("pre");
-      list.textContent = "Tables/views:\n" + d.items.map((t) => `  [${t.type}] ${t.name}`).join("\n");
-      body.appendChild(list);
+  if (d.mode === "table" && (d.accessor === "recycle" || d.kind === "recycle"
+      || d.accessor === "prefetch" || d.kind === "prefetch"
+      || d.accessor === "shellbags" || d.kind === "shellbags"
+      || d.accessor === "exif" || d.kind === "exif"
+      || d.accessor === "sam" || d.kind === "sam")) {
+    const table = document.createElement("table");
+    table.className = "meta meta-readable recycle-table";
+    if (d.kind === "prefetch" || d.accessor === "prefetch") {
+      const warn = document.createElement("div");
+      warn.className = "meta-highlight";
+      warn.innerHTML =
+        `<div class="mh-title">Windows Prefetch</div>` +
+        `<div class="mh-row"><span class="k">Tip</span>` +
+        `<span class="v">Installer .pf ≠ app was used. Look for a separate browser .pf for real runs.</span></div>`;
+      body.appendChild(warn);
     }
-    if (d.columns && d.rows) {
-      const table = document.createElement("table");
-      table.className = "meta data";
-      const thead = document.createElement("tr");
-      d.columns.forEach((c) => {
-        const th = document.createElement("th");
-        th.textContent = c;
-        thead.appendChild(th);
-      });
-      table.appendChild(thead);
-      d.rows.forEach((row) => {
-        const tr = document.createElement("tr");
-        row.forEach((cell) => {
-          const td = document.createElement("td");
-          td.textContent = cell;
-          tr.appendChild(td);
-        });
-        table.appendChild(tr);
-      });
-      body.appendChild(table);
+    if (d.kind === "shellbags" || d.accessor === "shellbags") {
+      const warn = document.createElement("div");
+      warn.className = "meta-highlight";
+      warn.innerHTML =
+        `<div class="mh-title">ShellBags (BagMRU)</div>` +
+        `<div class="mh-row"><span class="k">Tip</span>` +
+        `<span class="v">Phone photos often live under DCIM → Camera before copy into Pictures\\Contact.</span></div>`;
+      body.appendChild(warn);
     }
+    if (d.kind === "sam" || d.accessor === "sam") {
+      const warn = document.createElement("div");
+      warn.className = "meta-highlight";
+      warn.innerHTML =
+        `<div class="mh-title">SAM / NTLM hashes</div>` +
+        `<div class="mh-row"><span class="k">Tip</span>` +
+        `<span class="v">TFF dumps with SYSTEM boot key, then auto-cracks via hashcat (masks). Cracked passwords show inline.</span></div>`;
+      body.appendChild(warn);
+    }
+    if ((d.kind === "exif" || d.accessor === "exif") && d.data_url) {
+      const wrap = document.createElement("div");
+      wrap.className = "img-wrap";
+      const img = document.createElement("img");
+      img.src = d.data_url;
+      img.alt = selPath || "";
+      wrap.appendChild(img);
+      body.appendChild(wrap);
+    }
+    (d.rows || []).forEach((row) => {
+      const tr = document.createElement("tr");
+      const k = row[0] == null ? "" : String(row[0]);
+      const v = row[1] == null ? "" : String(row[1]);
+      const isTime = /UTC/i.test(v) || /run|date|time/i.test(k);
+      const isHit = /camera|dcim|lg |proton|hint|john doe|ntlm|boot key|crack/i.test(k + " " + v);
+      if (isHit) tr.classList.add("hit-row");
+      tr.innerHTML = `<td class="k">${escapeHtml(k)}</td><td class="v${isTime ? " timeish" : ""}">${escapeHtml(v)}</td>`;
+      tr.title = v;
+      table.appendChild(tr);
+    });
+    body.appendChild(table);
+    if (d.text) {
+      const pre = document.createElement("pre");
+      pre.className = "muted";
+      pre.textContent = d.text;
+      body.appendChild(pre);
+    }
+    return;
+  }
+
+  if (d.mode === "table" || d.mode === "sqlite-browser" || d.kind === "sqlite") {
+    renderSqliteBrowser(d, body);
     return;
   }
 
@@ -583,20 +1566,6 @@ async function loadFindings() {
   }, { title: "Findings", message: "Loading artifact hits", overlayDelay: 150 });
 }
 
-async function runSearch(q) {
-  if (!q) { await loadTree(); return; }
-  await withBusy("Searching…", async () => {
-    const d = await api("/api/search?q=" + encodeURIComponent(q));
-    const ul = document.createElement("ul");
-    ul.className = "tree root";
-    (d.results || []).forEach((r) => {
-      ul.appendChild(makeNode({ name: r.name, path: r.path, is_dir: false, size: r.size }));
-    });
-    $("#tree").innerHTML = "";
-    $("#tree").appendChild(ul);
-  }, { title: "Search", message: q, overlayDelay: 120 });
-}
-
 document.querySelectorAll(".tab").forEach((t) => {
   t.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
@@ -631,10 +1600,54 @@ if (exportBtn) {
   });
 }
 
-let searchTimer = null;
-$("#search").addEventListener("input", (e) => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => runSearch(e.target.value.trim()), 200);
+$("#search").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    submitGlobalSearch();
+  }
+});
+const insideQ = $("#inside-q");
+if (insideQ) {
+  insideQ.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submitInsideSearch();
+    }
+  });
+}
+const btnSearch = $("#btn-search");
+if (btnSearch) btnSearch.onclick = () => submitGlobalSearch();
+const btnInsideGo = $("#btn-inside-go");
+if (btnInsideGo) btnInsideGo.onclick = () => submitInsideSearch();
+const btnNavBack = $("#btn-nav-back");
+if (btnNavBack) btnNavBack.onclick = () => goBack();
+const btnFolderGrep = $("#btn-folder-grep");
+if (btnFolderGrep) {
+  btnFolderGrep.onclick = () => {
+    const iq = $("#inside-q");
+    if (iq) {
+      iq.focus();
+      if (iq.value.trim()) submitInsideSearch();
+    } else {
+      promptFolderGrep();
+    }
+  };
+}
+const hitClose = $("#hit-close");
+if (hitClose) hitClose.onclick = () => hideHitPanel();
+const hitPanel = $("#hit-panel");
+if (hitPanel) {
+  hitPanel.addEventListener("click", (e) => {
+    if (e.target === hitPanel) hideHitPanel();
+  });
+}
+updateNavChrome();
+
+// Desktop shell reads this when opening Terminal on the selected file
+window.__tffGetSelection = () => ({
+  path: selPath || null,
+  name: selPath ? (selPath.split("/").pop() || selPath) : null,
+  browseDir: browseDir || null,
 });
 
 (async () => {
@@ -656,6 +1669,7 @@ $("#search").addEventListener("input", (e) => {
     await loadTree();
     await loadFindings();
     await loadXmount();
+    startDepsWatch();
   } finally {
     hideBusy();
   }

@@ -185,6 +185,14 @@ class Handler(BaseHTTPRequestHandler):
                 if _is_disk_case(CASE):
                     return self._api_disk_file(q)
                 return self._api_file(q)
+            if route == "/api/sqlite/tables":
+                return self._api_sqlite("tables", q)
+            if route == "/api/sqlite/schema":
+                return self._api_sqlite("schema", q)
+            if route == "/api/sqlite/rows":
+                return self._api_sqlite("rows", q)
+            if route == "/api/sqlite/search":
+                return self._api_sqlite("search", q)
             if route == "/api/download":
                 if CASE is None or _is_disk_case(CASE):
                     return self._send(400, {
@@ -194,9 +202,9 @@ class Handler(BaseHTTPRequestHandler):
                     })
                 return self._api_download(q)
             if route == "/api/search":
-                if CASE is None or _is_disk_case(CASE):
-                    return self._send(200, {"results": [], "count": 0})
                 return self._api_search(q)
+            if route == "/api/grep":
+                return self._api_grep(q)
             if route == "/api/accessors":
                 return self._send(200, {"accessors": list_accessors()})
             if route == "/api/artifacts":
@@ -205,6 +213,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"hits": classify_artifacts(CASE.files)})
             if route == "/api/health":
                 from tforensic import APP_NAME, APP_SHORT, __version__
+                from tforensic.deps import check_dependencies
+
+                deps = check_dependencies()
                 return self._send(200, {
                     "ok": True,
                     "name": APP_NAME,
@@ -212,7 +223,16 @@ class Handler(BaseHTTPRequestHandler):
                     "version": __version__,
                     "session": CASE.meta.id if CASE is not None else None,
                     "kind": getattr(CASE, "kind", "ad1") if CASE is not None else "case",
+                    "deps": {
+                        "complete": deps.get("complete"),
+                        "missing": deps.get("counts", {}).get("missing", 0),
+                        "summary": deps.get("summary"),
+                    },
                 })
+            if route == "/api/deps":
+                from tforensic.deps import check_dependencies
+
+                return self._send(200, check_dependencies())
             if route == "/api/version":
                 from tforensic import APP_NAME, APP_SHORT, __version__
                 return self._send(200, {
@@ -501,8 +521,20 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             from tforensic.errors import explain_exception
             return self._send(400, explain_exception(e).as_dict())
-        # limit preview size
-        preview = data[: min(len(data), 2_000_000)]
+        # limit preview size (SQLite needs a fuller extract for browsing)
+        from tforensic.sqlite_view import MAX_SQLITE_BYTES, looks_like_sqlite
+        want_sqlite = looks_like_sqlite(b"", parsed["name"]) or (
+            len(data) >= 16 and data[:15] == b"SQLite format 3"
+        )
+        # Re-read if we truncated a SQLite DB at 2MB — icat already wrote full file to dest
+        if want_sqlite:
+            try:
+                data = Path(out).read_bytes()[:MAX_SQLITE_BYTES]
+            except Exception:
+                pass
+            preview = data
+        else:
+            preview = data[: min(len(data), 2_000_000)]
         if mode == "hex":
             return self._send(200, {
                 "accessor": "hex", "label": "Hex", "mode": "hex",
@@ -649,21 +681,119 @@ class Handler(BaseHTTPRequestHandler):
         if not node:
             return self._send(404, {"error": "path not found"})
         attrs = {str(k): v for k, v in CASE.img.metadata(node).items()}
-        return self._send(200, {"path": node.path, "attrs": attrs})
+        from tforensic.meta_format import format_attrs, parse_recycle_i
+
+        rows = format_attrs(attrs)
+        extra = {}
+        name = (node.name or "").upper()
+        if name.startswith("$I") and not node.is_dir:
+            try:
+                data = CASE.read(node.path)
+                parsed = parse_recycle_i(data)
+                if parsed:
+                    extra["recycle"] = parsed
+            except Exception:
+                pass
+        return self._send(200, {"path": node.path, "attrs": attrs, "rows": rows, **extra})
 
     def _api_hash(self, q):
         node = self._node(q)
-        if not node or node.is_dir:
+        if not node or (node.is_dir and not (node.chunk_desc_rel and node.size)):
             return self._send(404, {"error": "file not found"})
         data = CASE.read(node.path)
         out = hashes(data)
         out["executable"] = is_executable(data)
         return self._send(200, out)
 
+    def _read_evidence_bytes(self, path: str, max_bytes: int | None = None) -> tuple[bytes, str]:
+        """Return (bytes, display_name) for AD1 path or inode: disk path."""
+        from tforensic.sqlite_view import MAX_SQLITE_BYTES
+        cap = max_bytes if max_bytes is not None else MAX_SQLITE_BYTES
+        if path.startswith("inode:"):
+            parsed = self._parse_inode_path(path)
+            if not parsed:
+                raise ValueError("Invalid disk inode path")
+            dest = Path(CASE.meta.export_dir) / f"sqlite_{parsed['inode']}_{parsed['name']}"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            out = xm.icat_extract(
+                CASE.mount.virtual_device,
+                str(parsed["inode"]),
+                dest,
+                offset_sectors=parsed["offset"],
+            )
+            data = Path(out).read_bytes()[:cap]
+            return data, parsed["name"]
+        if CASE is None:
+            raise ValueError("No image open")
+        if _is_disk_case(CASE) or _is_pcap_case(CASE):
+            raise ValueError("Select a file from the Tree (AD1 path or disk inode)")
+        node = CASE.get(path)
+        if not node or (node.is_dir and not (node.chunk_desc_rel and node.size)):
+            raise ValueError(f"File not found: {path}")
+        data = CASE.read(node.path)[:cap]
+        return data, node.name
+
+    def _api_sqlite(self, action: str, q):
+        from tforensic.sqlite_view import (
+            list_tables,
+            materialize_sqlite,
+            table_rows,
+            table_schema,
+            table_search,
+        )
+        path = (q.get("path") or [None])[0]
+        if not path:
+            return self._send(400, {
+                "error": "path required",
+                "title": "Missing path",
+                "suggestion": "Click a .sqlite / .db file in the Tree first.",
+            })
+        if CASE is None:
+            return self._send(400, {
+                "error": "No image open",
+                "title": "Nothing open",
+                "suggestion": "Open evidence, then select a SQLite file.",
+            })
+        try:
+            data, name = self._read_evidence_bytes(path)
+            cache_dir = str(Path(CASE.meta.export_dir) / "sqlite-cache")
+            mat = materialize_sqlite(path, data, cache_dir=cache_dir)
+            db_path = mat["path"]
+            if action == "tables":
+                tables = list_tables(db_path)
+                return self._send(200, {
+                    "path": path,
+                    "name": name,
+                    "size": mat["size"],
+                    "truncated": mat["truncated"],
+                    "tables": tables,
+                })
+            table = (q.get("table") or [None])[0]
+            if not table:
+                return self._send(400, {
+                    "error": "table query required",
+                    "title": "No table",
+                    "suggestion": "Pick a table from the SQLite browser list.",
+                })
+            if action == "schema":
+                return self._send(200, table_schema(db_path, table))
+            if action == "rows":
+                offset = int((q.get("offset") or ["0"])[0] or 0)
+                limit = int((q.get("limit") or ["100"])[0] or 100)
+                return self._send(200, table_rows(db_path, table, offset, limit))
+            if action == "search":
+                term = (q.get("q") or [""])[0] or ""
+                limit = int((q.get("limit") or ["300"])[0] or 300)
+                return self._send(200, table_search(db_path, table, term, limit))
+            return self._send(404, {"error": f"unknown sqlite action: {action}"})
+        except Exception as e:
+            from tforensic.errors import explain_exception
+            return self._send(400, explain_exception(e).as_dict())
+
     def _api_file(self, q):
         path = (q.get("path") or [None])[0]
         node = self._node(q)
-        if not node or node.is_dir:
+        if not node or (node.is_dir and not (node.chunk_desc_rel and node.size)):
             return self._send(404, {
                 "error": f"File not found in AD1 tree: {path}",
                 "title": "File not found",
@@ -708,7 +838,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, out)
         # Extension-aware accessor (default Preview tab)
         try:
-            acc = open_with_accessor(node.path, data, force=force)
+            system_data = None
+            if (force or "").lower() == "sam" or (node.name or "").upper() == "SAM":
+                from tforensic.sam_view import find_sibling_hive
+
+                sys_path = find_sibling_hive(CASE.get, node.path, "SYSTEM")
+                if sys_path:
+                    try:
+                        system_data = CASE.read(sys_path)
+                    except Exception:
+                        system_data = None
+            acc = open_with_accessor(node.path, data, force=force, system_data=system_data)
             return self._send(200, accessor_to_dict(acc))
         except Exception as e:
             from tforensic.errors import explain_exception
@@ -716,7 +856,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _api_download(self, q):
         node = self._node(q)
-        if not node or node.is_dir:
+        if not node or (node.is_dir and not (node.chunk_desc_rel and node.size)):
             return self._send(404, {"error": "file not found"})
         data = CASE.read(node.path)
         fname = node.name.replace('"', "")
@@ -729,14 +869,132 @@ class Handler(BaseHTTPRequestHandler):
 
     def _api_search(self, q):
         term = (q.get("q", [""])[0] or "").lower()
+        under = (q.get("under") or [None])[0]
         if not term:
-            return self._send(200, {"results": [], "count": 0})
-        results = [
-            {"path": n.path, "name": n.name, "size": n.size}
-            for n in CASE.files
-            if term in n.name.lower()
-        ]
-        return self._send(200, {"results": results[:500], "count": len(results)})
+            return self._send(200, {"results": [], "count": 0, "under": under})
+        if CASE is None:
+            return self._send(200, {"results": [], "count": 0, "under": under})
+        # Disk inode trees: search via fls listing of parent when possible
+        if _is_disk_case(CASE) and under and str(under).startswith(("part:", "inode:")):
+            try:
+                kids = self._disk_tree_children(under)
+                children = kids.get("children") or []
+                results = []
+                for c in children:
+                    name = (c.get("name") or "").lower()
+                    path = c.get("path") or ""
+                    if term in name or term in path.lower():
+                        results.append({
+                            "path": path,
+                            "name": c.get("name"),
+                            "size": c.get("size"),
+                            "is_dir": bool(c.get("is_dir")),
+                        })
+                return self._send(200, {
+                    "results": results[:500],
+                    "count": len(results),
+                    "under": under,
+                    "scope": "folder",
+                })
+            except Exception as e:
+                return self._send(400, {
+                    "error": str(e),
+                    "title": "Folder search failed",
+                    "suggestion": "Try expanding the folder in Tree, then search again.",
+                })
+        files = getattr(CASE, "files", None) or []
+        results = []
+        for n in files:
+            if under and not (n.path == under or n.path.startswith(under.rstrip("/") + "/")):
+                continue
+            if term in n.name.lower() or term in n.path.lower():
+                results.append({
+                    "path": n.path,
+                    "name": n.name,
+                    "size": n.size,
+                    "is_dir": False,
+                })
+        return self._send(200, {
+            "results": results[:500],
+            "count": len(results),
+            "under": under,
+            "scope": "folder" if under else "image",
+        })
+
+    def _api_grep(self, q):
+        """Grep-like filename + small-text content search under a folder."""
+        term = (q.get("q", [""])[0] or "")
+        under = (q.get("under") or [None])[0]
+        if not term:
+            return self._send(200, {"hits": [], "count": 0})
+        if CASE is None or _is_pcap_case(CASE):
+            return self._send(400, {
+                "error": "Open an AD1/disk image first.",
+                "title": "Nothing to search",
+            })
+        term_l = term.lower()
+        hits = []
+        # 1) filename hits (reuse search)
+        sq = {"q": [term], "under": [under] if under else []}
+        name_hits = self._api_search_collect(term_l, under)
+        for r in name_hits[:200]:
+            hits.append({**r, "kind": "name", "snippet": r.get("path")})
+
+        # 2) content peek for AD1 text-ish files under folder (cap work)
+        if not _is_disk_case(CASE) and hasattr(CASE, "files"):
+            scanned = 0
+            for n in CASE.files:
+                if scanned >= 80 or len(hits) >= 300:
+                    break
+                if n.is_dir:
+                    continue
+                if under and not (n.path == under or n.path.startswith(under.rstrip("/") + "/")):
+                    continue
+                if n.size and n.size > 512_000:
+                    continue
+                ext = (n.name.rsplit(".", 1)[-1].lower() if "." in n.name else "")
+                if ext in {"sqlite", "sqlite3", "db", "db3", "jpg", "png", "gif", "pdf", "exe", "dll", "zip"}:
+                    continue
+                try:
+                    data = CASE.read(n.path)[:64_000]
+                except Exception:
+                    continue
+                scanned += 1
+                try:
+                    text = data.decode("utf-8", errors="ignore")
+                except Exception:
+                    continue
+                if term_l not in text.lower():
+                    continue
+                idx = text.lower().find(term_l)
+                start = max(0, idx - 40)
+                snippet = text[start : start + 120].replace("\n", " ")
+                hits.append({
+                    "path": n.path,
+                    "name": n.name,
+                    "size": n.size,
+                    "kind": "content",
+                    "snippet": snippet,
+                })
+        return self._send(200, {
+            "hits": hits[:300],
+            "count": len(hits),
+            "under": under,
+            "q": term,
+        })
+
+    def _api_search_collect(self, term_l: str, under: Optional[str]):
+        if CASE is None:
+            return []
+        if _is_disk_case(CASE):
+            return []
+        out = []
+        for n in getattr(CASE, "files", []) or []:
+            if under and not (n.path == under or n.path.startswith(under.rstrip("/") + "/")):
+                continue
+            if term_l in n.name.lower() or term_l in n.path.lower():
+                out.append({"path": n.path, "name": n.name, "size": n.size, "is_dir": False})
+        return out
 
     def _api_xm_partitions(self, q):
         try:

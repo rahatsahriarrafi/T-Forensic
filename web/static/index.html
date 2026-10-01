@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Orbitron:wght@600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=tff4">
+<link rel="stylesheet" href="/static/style.css?v=tff24">
 </head>
 <body class="gui-dashboard">
 <header>
@@ -24,7 +24,10 @@
     <span class="work-spin" aria-hidden="true"></span>
     <span id="work-status-text">Working…</span>
   </div>
-  <input id="search" type="search" placeholder="Search filenames…" autocomplete="off">
+  <button type="button" id="btn-nav-back" class="nav-back" title="Back to previous file/folder" disabled>← Back</button>
+  <input id="search" type="search" placeholder="Search whole image — Enter / Search…" autocomplete="off" title="Searches the entire loaded image">
+  <button type="button" id="btn-search" class="nav-grep" title="Search whole image">Search</button>
+  <button type="button" id="btn-folder-grep" class="nav-grep" title="Jump to Inside search (below)">Inside ↓</button>
 </header>
 
 <main>
@@ -213,6 +216,12 @@
     <div id="detail-head" class="detail-head">
       <span class="muted">Select a file…</span>
     </div>
+    <div id="inside-bar" class="inside-bar" title="Inside search is always available">
+      <label class="inside-label" for="inside-q">Inside</label>
+      <input id="inside-q" type="search" placeholder="Search in this view / folder / image…" autocomplete="off">
+      <button type="button" id="btn-inside-go" class="nav-grep">Search</button>
+      <span id="inside-scope" class="inside-scope muted">whole image</span>
+    </div>
     <div class="detail-tabs">
       <button class="dtab active" data-view="text">Preview</button>
       <button class="dtab" data-view="hex">Hex</button>
@@ -252,8 +261,28 @@
     </div>
   </div>
 </div>
+<div id="deps-banner" class="deps-banner" hidden>
+  <div class="deps-banner-inner">
+    <strong id="deps-title">Missing tools</strong>
+    <div id="deps-list" class="deps-list"></div>
+    <div class="deps-actions">
+      <button type="button" id="deps-refresh" class="disk-btn secondary">Re-check</button>
+      <button type="button" id="deps-dismiss" class="disk-btn secondary">Hide</button>
+    </div>
+  </div>
+</div>
 <div id="toast" aria-live="assertive"></div>
+<div id="hit-panel" class="hit-panel" hidden>
+  <div class="hit-card">
+    <div class="hit-head">
+      <strong id="hit-title">Search results</strong>
+      <button type="button" id="hit-close" class="hit-close">Close</button>
+    </div>
+    <div class="hit-sub" id="hit-sub"></div>
+    <div class="hit-list" id="hit-list"></div>
+  </div>
+</div>
 
-<script src="/static/app.js?v=tff4"></script>
+<script src="/static/app.js?v=tff24"></script>
 </body>
 </html>

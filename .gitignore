@@ -33,3 +33,8 @@ npm-debug.log*
 .vscode/
 *.swp
 .pytest_cache/
+
+# local hashcat/john session noise
+tff*.log
+engine/tff*.log
+

@@ -38,6 +38,42 @@ def explain_exception(exc: BaseException, context: str = "") -> UserError:
     def ue(title, message, suggestion, detail="") -> UserError:
         return UserError(title, message, suggestion, detail or msg)
 
+    if "pyscca" in low or "libscca" in low:
+        return ue(
+            "Prefetch library missing",
+            "Prefetch parsing needs pyscca (libscca).",
+            "Install: sudo apt install python3-libscca",
+        )
+    if "pyregf" in low or "libregf" in low or "pyfwsi" in low:
+        return ue(
+            "Registry library missing",
+            "ShellBags / hive tools need libregf (+ libfwsi).",
+            "Install: sudo apt install python3-libregf python3-libfwsi",
+        )
+    if "impacket" in low:
+        return ue(
+            "impacket missing",
+            "SAM NTLM dump needs the impacket Python package.",
+            "Install: pip install -r requirements.txt",
+        )
+    if "hashcat" in low or "john the ripper" in low or ("john" in low and "not" in low):
+        return ue(
+            "Password cracker missing",
+            "Auto-crack needs john (preferred) or hashcat.",
+            "Install: sudo apt install john hashcat",
+        )
+    if "exiftool" in low:
+        return ue(
+            "exiftool missing",
+            "Image EXIF preview needs exiftool.",
+            "Install: sudo apt install libimage-exiftool-perl",
+        )
+    if "tshark" in low:
+        return ue(
+            "tshark missing",
+            "Full PCAP analysis needs Wireshark's tshark.",
+            "Install: sudo apt install tshark",
+        )
     if "xmount not found" in low or ("xmount" in low and "path" in low):
         return ue(
             "xmount missing",

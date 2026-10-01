@@ -2,10 +2,30 @@
 
 ## Runtime dependencies
 
+Python packages:
+
 ```bash
-sudo apt install python3 xmount sleuthkit qemu-utils fuse
+pip install -r requirements.txt
+```
+
+System packages (Debian/Kali/Ubuntu):
+
+```bash
+sudo apt install $(grep -v '^#' requirements-system.txt | tr '\n' ' ')
+# or the short set:
+sudo apt install python3 xmount sleuthkit qemu-utils fuse3 tshark \
+  python3-libscca python3-libregf python3-libfwsi libimage-exiftool-perl \
+  john hashcat samdump2
 # optional deep carve
 sudo apt install testdisk   # provides photorec
+```
+
+Check what’s missing anytime (prints install suggestions):
+
+```bash
+tforensic deps
+# JSON: tforensic deps --json
+# API:  GET /api/deps
 ```
 
 Ensure `/etc/fuse.conf` has `user_allow_other` uncommented if xmount requires it.

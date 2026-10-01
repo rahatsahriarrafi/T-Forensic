@@ -39,11 +39,19 @@ class Case:
                 return node
         return None
 
+    def _readable(self, node: Optional[Node]) -> bool:
+        if node is None:
+            return False
+        if not node.is_dir:
+            return True
+        # Fallback: dir-flagged node that still carries file chunks
+        return bool(node.chunk_desc_rel and node.size > 0)
+
     def read(self, path: str) -> bytes:
         node = self.get(path)
-        if node is None or node.is_dir:
+        if not self._readable(node):
             raise FileNotFoundError(f"file not found: {path}")
-        return self._cached_read(path)
+        return self._cached_read(node.path)
 
     @lru_cache(maxsize=256)
     def _cached_read(self, path: str) -> bytes:
@@ -52,7 +60,7 @@ class Case:
 
     def export_file(self, path: str, dest: Optional[str] = None) -> str:
         node = self.get(path)
-        if node is None or node.is_dir:
+        if not self._readable(node):
             raise FileNotFoundError(f"file not found: {path}")
         data = self.read(path)
         if dest:
@@ -63,7 +71,13 @@ class Case:
         else:
             out = safe_export_path(Path(self.meta.export_dir), path, node.name)
         out.write_bytes(data)
-        return str(out.resolve())
+        resolved = str(out.resolve())
+        try:
+            last = Path(self.meta.export_dir) / ".tff_last_export"
+            last.write_text(resolved + "\n", encoding="utf-8")
+        except OSError:
+            pass
+        return resolved
 
     def close(self) -> None:
         self._cached_read.cache_clear()

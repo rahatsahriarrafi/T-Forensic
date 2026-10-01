@@ -117,12 +117,25 @@ class AD1:
                 node.children = self._walk_siblings(
                     BASE + child_rel, node.path, visited
                 )
+            # FTK custom-content often stores real files (SAM/SYSTEM/…) as
+            # folders with a single $DSC sidecar while chunk data holds the
+            # hive bytes. Treat those as files so export/read work.
+            if (
+                node.chunk_desc_rel
+                and node.size > 0
+                and node.children
+                and all(c.name == "$DSC" for c in node.children)
+            ):
+                node.is_dir = False
             nodes.append(node)
             off = BASE + next_rel if next_rel else 0
         return nodes
 
     def read_file(self, node: Node) -> bytes:
-        if node.is_dir or not node.chunk_desc_rel:
+        # Chunk payload may exist even when AD1 attached sidecar children.
+        if not node.chunk_desc_rel:
+            return b""
+        if node.is_dir and not node.size:
             return b""
         desc = BASE + node.chunk_desc_rel
         num = self._u64(desc)

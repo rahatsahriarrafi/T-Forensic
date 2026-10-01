@@ -1,0 +1,34 @@
+# Team Forensic Framework (TFF) — system packages (Debian/Kali/Ubuntu)
+# Install everything recommended:
+#   sudo apt install $(grep -v '^#' requirements-system.txt | tr '\n' ' ')
+#
+# Or let TFF tell you what's missing:
+#   tforensic deps
+#   curl -s http://127.0.0.1:8000/api/deps | python3 -m json.tool
+
+# --- Disk / OVA ---
+xmount
+sleuthkit
+qemu-utils
+fuse3
+
+# --- Network / PCAP ---
+tshark
+
+# --- Artifact viewers ---
+python3-libscca
+python3-libregf
+python3-libfwsi
+libimage-exiftool-perl
+
+# --- SAM / NTLM crack ---
+john
+hashcat
+samdump2
+
+# --- Optional carve ---
+testdisk
+
+# --- Desktop (Electron) ---
+# nodejs
+# npm

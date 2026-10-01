@@ -227,6 +227,14 @@ def cmd_close(args):
 
 def cmd_serve(args):
     from tforensic.api.server import serve
+    from tforensic.deps import check_dependencies, format_deps_text
+
+    report = check_dependencies()
+    if report["counts"]["missing"]:
+        print(format_deps_text(report), file=sys.stderr)
+        print("", file=sys.stderr)
+    else:
+        print("deps: all recommended tools present", file=sys.stderr)
 
     return serve(
         image=args.image,
@@ -239,6 +247,17 @@ def cmd_serve(args):
         morph=getattr(args, "morph", None) or "combine",
         cache=getattr(args, "cache", None),
     )
+
+
+def cmd_deps(args):
+    from tforensic.deps import check_dependencies, format_deps_text
+
+    report = check_dependencies()
+    if getattr(args, "json", False):
+        print(json.dumps(report, indent=2))
+    else:
+        print(format_deps_text(report))
+    return 0 if report.get("complete") else 2
 
 
 def cmd_xmount_info(args):
@@ -561,6 +580,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--morph", default="combine")
     sp.add_argument("--cache", default=None)
     sp.set_defaults(func=cmd_serve)
+
+    sp = sub.add_parser("deps", help="check runtime tools and print install suggestions")
+    sp.add_argument("--json", action="store_true", help="machine-readable report")
+    sp.set_defaults(func=cmd_deps)
 
     # ---- xmount / disk images ----
     sp = sub.add_parser("xmount-info", help="show xmount / sleuthkit availability")

@@ -246,9 +246,10 @@
   <div id="term-wrap">
     <div id="term-resizer" title="Drag to resize terminal"></div>
     <div id="term-head">
-      <span>Session terminal — drag here to resize · <code>tfor-here</code> · <code>tfor-parts</code> · <code>cdmount</code></span>
+      <span>Terminal · selected file auto-exports here · <code>exiftool "$TFOR_FILE"</code> · Ctrl+Shift+C/V</span>
       <span style="display:flex;gap:8px;align-items:center">
-        <button type="button" id="btn-term-sync" title="Re-read mounts from current case" style="background:transparent;border:0;color:var(--accent);cursor:pointer;font:inherit;font-size:0.75rem">Sync</button>
+        <button type="button" id="btn-term-here" title="Export selected tree file and cd here" style="background:transparent;border:0;color:var(--accent);cursor:pointer;font:inherit;font-size:0.75rem">Open selected</button>
+        <button type="button" id="btn-term-sync" title="Load the Tree-selected file into this terminal" style="background:transparent;border:0;color:var(--accent);cursor:pointer;font:inherit;font-size:0.75rem">Sync</button>
         <button type="button" id="btn-term-close" style="background:transparent;border:0;color:var(--muted);cursor:pointer">Hide</button>
       </span>
     </div>

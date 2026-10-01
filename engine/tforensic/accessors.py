@@ -5,7 +5,6 @@ import base64
 import json
 import mimetypes
 import os
-import sqlite3
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -29,6 +28,11 @@ ACCESSOR_LABELS = {
     "media": "Media",
     "office": "Office",
     "pcap": "PCAP / Network",
+    "recycle": "Recycle Bin $I",
+    "prefetch": "Prefetch",
+    "shellbags": "ShellBags",
+    "exif": "EXIF / Metadata",
+    "sam": "SAM / NTLM",
     "auto": "Auto",
 }
 
@@ -48,14 +52,16 @@ _reg("text",
      "reg", "inf", "url", "desktop", "service", "gitignore", "dockerfile")
 _reg("json", "json", "jsonl", "geojson", "webmanifest")
 _reg("markup", "html", "htm", "xhtml", "xml", "svg", "xsl", "xslt", "plist")
-_reg("image", "png", "jpg", "jpeg", "gif", "bmp", "webp", "ico", "tif", "tiff")
+_reg("image", "gif", "bmp", "ico")
+_reg("exif", "jpg", "jpeg", "tif", "tiff", "heic", "png", "webp")
 _reg("archive", "zip", "jar", "apk", "whl", "docx", "xlsx", "pptx", "odt", "ods")
 _reg("sqlite", "sqlite", "sqlite3", "db", "db3")
 _reg("pe", "exe", "dll", "sys", "scr", "com", "cpl", "ocx", "mui", "drv")
 _reg("pdf", "pdf")
 _reg("media", "mp3", "mp4", "wav", "flac", "ogg", "webm", "avi", "mkv", "mov", "m4a")
 _reg("office", "doc", "xls", "ppt", "rtf")
-_reg("hex", "bin", "dat", "img", "raw", "dump", "evtx", "pf", "lnk")
+_reg("hex", "bin", "dat", "img", "raw", "dump", "evtx", "lnk")
+_reg("prefetch", "pf")
 _reg(
     "pcap",
     "pcap", "pcapng", "cap", "dmp", "pkt", "snoop", "netmon", "ntar",
@@ -93,6 +99,21 @@ def extension_of(path: str) -> str:
 
 
 def accessor_for(path: str, data: bytes | None = None) -> str:
+    name = Path(path).name
+    uname = name.upper()
+    # Windows Recycle Bin $I* (not NTFS $I30 index)
+    if uname.startswith("$I") and not uname.startswith("$I30") and len(uname) > 2:
+        if data is None:
+            return "recycle"
+        from tforensic.meta_format import parse_recycle_i
+        if parse_recycle_i(data):
+            return "recycle"
+    # ShellBags hives
+    if uname in {"USRCLASS.DAT", "NTUSER.DAT"} or uname.endswith("USRCLASS.DAT"):
+        return "shellbags"
+    # Local SAM (needs sibling SYSTEM for boot key — handled in API)
+    if uname == "SAM":
+        return "sam"
     ext = extension_of(path)
     if ext in EXT_MAP:
         return EXT_MAP[ext]
@@ -104,7 +125,7 @@ def accessor_for(path: str, data: bytes | None = None) -> str:
         if data[:2] == b"PK":
             return "archive"
         if data[:3] == b"\xff\xd8\xff":
-            return "image"
+            return "exif"
         if data[:8] == b"\x89PNG\r\n\x1a\n":
             return "image"
         if data[:6] in (b"GIF87a", b"GIF89a"):
@@ -250,45 +271,25 @@ def _archive_result(path: str, data: bytes) -> AccessorResult:
 
 
 def _sqlite_result(path: str, data: bytes) -> AccessorResult:
-    if data[:15] != b"SQLite format 3":
-        # still try — some DBs are valid
-        pass
-    tmp_path = None
+    from tforensic.sqlite_view import browse_summary, materialize_sqlite
+
     try:
-        with tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False) as tmp:
-            tmp.write(data)
-            tmp_path = tmp.name
-        con = sqlite3.connect(f"file:{tmp_path}?mode=ro", uri=True)
-        try:
-            cur = con.execute(
-                "SELECT name, type FROM sqlite_master WHERE type IN ('table','view') ORDER BY name"
-            )
-            tables = [{"name": r[0], "type": r[1]} for r in cur.fetchall()]
-            sample_rows = []
-            columns = []
-            if tables:
-                tname = tables[0]["name"]
-                # quote identifier safely
-                safe = tname.replace('"', '""')
-                colcur = con.execute(f'SELECT * FROM "{safe}" LIMIT 50')
-                columns = [d[0] for d in colcur.description] if colcur.description else []
-                sample_rows = [list(map(str, row)) for row in colcur.fetchall()]
-            return AccessorResult(
-                accessor="sqlite",
-                label="SQLite",
-                extension=extension_of(path),
-                mime="application/x-sqlite3",
-                mode="table",
-                rows=sample_rows,
-                columns=columns,
-                items=tables,
-                size=len(data),
-                kind="sqlite",
-                note=f"{len(tables)} tables/views"
-                + (f"; sample from `{tables[0]['name']}`" if tables else ""),
-            )
-        finally:
-            con.close()
+        mat = materialize_sqlite(path, data)
+        summary = browse_summary(mat["path"], size=len(data), truncated=mat["truncated"])
+        return AccessorResult(
+            accessor="sqlite",
+            label="SQLite",
+            extension=extension_of(path),
+            mime="application/x-sqlite3",
+            mode="sqlite-browser",
+            rows=summary.get("rows"),
+            columns=summary.get("columns"),
+            items=summary.get("items"),
+            size=len(data),
+            truncated=mat["truncated"],
+            kind="sqlite",
+            note=summary.get("note") or "",
+        )
     except Exception as e:
         prev = detect_and_decode(data, force_hex=True)
         return AccessorResult(
@@ -303,9 +304,250 @@ def _sqlite_result(path: str, data: bytes) -> AccessorResult:
             kind="sqlite",
             note=f"SQLite open failed: {e}",
         )
-    finally:
-        if tmp_path and os.path.isfile(tmp_path):
-            os.unlink(tmp_path)
+
+
+def _shellbags_result(path: str, data: bytes) -> AccessorResult:
+    from tforensic.shellbags_view import parse_shellbags, shellbags_summary_text
+
+    info = parse_shellbags(data, name=Path(path).name)
+    rows = [
+        ["Hive", info.get("hive") or Path(path).name],
+        ["BagMRU key", info.get("bagmru_key") or "?"],
+        ["Entries", str(info.get("count", 0))],
+    ]
+    for p in (info.get("phone_paths") or [])[:40]:
+        rows.append(["Path", p])
+    if not info.get("phone_paths"):
+        for e in (info.get("interesting") or [])[:40]:
+            rows.append(["Folder", f"{e.get('bag_path')} → {e.get('name')}"])
+    if info.get("error"):
+        rows.append(["Error", str(info["error"])])
+    # Q9-style hint
+    names = {(e.get("name") or "") for e in (info.get("entries") or [])}
+    if "DCIM" in names and "Camera" in names:
+        rows.insert(3, ["Hint (phone photos)", "DCIM → Camera (parent folder under DCIM)"])
+    return AccessorResult(
+        accessor="shellbags",
+        label="ShellBags",
+        extension=extension_of(path) or "dat",
+        mime="application/x-windows-registry",
+        mode="table",
+        columns=["Field", "Value"],
+        rows=rows,
+        size=len(data),
+        kind="shellbags",
+        note=info.get("note") or "ShellBags / BagMRU",
+        text=shellbags_summary_text(info),
+        items=[e.get("name") for e in (info.get("entries") or []) if e.get("name")],
+    )
+
+
+def _sam_result(path: str, data: bytes, system_data: bytes | None = None) -> AccessorResult:
+    from tforensic.sam_view import dump_sam_hashes, sam_summary_text
+
+    if system_data is None:
+        rows = [
+            ["SAM", Path(path).name],
+            ["Size", str(len(data))],
+            ["Header", data[:4].decode("ascii", "replace") if data[:4] == b"regf" else "not regf"],
+            ["Error", "SYSTEM hive required (same folder) to decrypt NTLM hashes"],
+            ["Hint", "Open Windows\\System32\\config\\SAM — TFF loads sibling SYSTEM automatically"],
+        ]
+        return AccessorResult(
+            accessor="sam",
+            label="SAM / NTLM",
+            extension="",
+            mime="application/x-windows-registry",
+            mode="table",
+            columns=["Field", "Value"],
+            rows=rows,
+            size=len(data),
+            kind="sam",
+            note="SAM hive — need SYSTEM for boot key",
+            text="Export SAM + SYSTEM, then: secretsdump.py -sam SAM -system SYSTEM LOCAL",
+        )
+
+    info = dump_sam_hashes(data, system_data)
+    crack = info.get("crack") or {}
+    rows: list[list[str]] = [
+        ["SAM", Path(path).name],
+        ["Method", str(info.get("method") or "?")],
+        ["Boot key", str(info.get("boot_key") or "?")],
+        ["Accounts", str(info.get("count", 0))],
+        [
+            "Auto-crack",
+            (
+                f"{crack.get('tool') or 'unavailable'} · "
+                f"{crack.get('cracked', 0)}/{crack.get('attempted', 0)} cracked"
+                if crack.get("tool")
+                else (crack.get("note") or "hashcat/john not found")
+            ),
+        ],
+    ]
+    if info.get("error"):
+        rows.append(["Error", str(info["error"])])
+    for u in info.get("users") or []:
+        flag = []
+        if u.get("disabled"):
+            flag.append("disabled")
+        if u.get("empty_password"):
+            pw = "(empty)"
+            flag.append("empty")
+        elif u.get("password") is not None:
+            pw = str(u["password"])
+            flag.append("CRACKED")
+        else:
+            pw = "(not cracked)"
+        suf = f" · {', '.join(flag)}" if flag else ""
+        rows.append(
+            [
+                f"{u['username']} (RID {u['rid']})",
+                f"{pw}  |  NTLM {u['nt_hash']}{suf}",
+            ]
+        )
+    return AccessorResult(
+        accessor="sam",
+        label="SAM / NTLM",
+        extension="",
+        mime="application/x-windows-registry",
+        mode="table",
+        columns=["Field", "Value"],
+        rows=rows,
+        size=len(data),
+        kind="sam",
+        note=info.get("note") or "Local SAM NTLM hashes",
+        text=sam_summary_text(info),
+        items=[u.get("pwdump") for u in (info.get("users") or [])],
+    )
+
+
+def _exif_result(path: str, data: bytes) -> AccessorResult:
+    """JPEG/TIFF EXIF via exiftool when available (phone make/model for Q9)."""
+    import shutil
+    import subprocess
+
+    rows: list[list[str]] = []
+    text = ""
+    note = "Image EXIF"
+    if shutil.which("exiftool"):
+        import tempfile
+        import os
+
+        fd, tmp = tempfile.mkstemp(suffix="." + (extension_of(path) or "jpg"))
+        try:
+            os.write(fd, data)
+            os.close(fd)
+            proc = subprocess.run(
+                ["exiftool", "-s", "-Make", "-Model", "-CreateDate", "-DateTimeOriginal",
+                 "-ModifyDate", "-Software", "-GPSPosition", "-LensModel", "-ImageSize", tmp],
+                capture_output=True, text=True, timeout=20,
+            )
+            text = (proc.stdout or "") + (proc.stderr or "")
+            for line in (proc.stdout or "").splitlines():
+                if ":" in line:
+                    k, _, v = line.partition(":")
+                    rows.append([k.strip(), v.strip()])
+            make = next((v for k, v in rows if k.lower() == "make"), "")
+            model = next((v for k, v in rows if k.lower() == "model"), "")
+            if make or model:
+                note = f"Camera: {make} {model}".strip()
+                rows.insert(0, ["Hint", "Phone/camera EXIF — check ShellBags (UsrClass.dat) for DCIM\\Camera"])
+        except Exception as e:
+            rows.append(["exiftool", str(e)])
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    else:
+        # fall back to image preview
+        return _image_result(path, data)
+    # still show the image
+    img = _image_result(path, data)
+    return AccessorResult(
+        accessor="exif",
+        label="EXIF / Image",
+        extension=extension_of(path),
+        mime=mime_for(path),
+        mode="table",
+        columns=["Field", "Value"],
+        rows=rows or [["Note", "No EXIF tags parsed"]],
+        size=len(data),
+        kind="exif",
+        note=note,
+        text=text or note,
+        data_url=img.data_url,
+    )
+
+
+def _prefetch_result(path: str, data: bytes) -> AccessorResult:
+    from tforensic.prefetch_view import parse_prefetch, prefetch_summary_text
+
+    info = parse_prefetch(data, name=Path(path).name) or {}
+    rows = [
+        ["Executable", info.get("executable") or "?"],
+        ["Run count", str(info.get("run_count", "?"))],
+        ["Last run (UTC)", info.get("last_run_utc") or "(none)"],
+        ["Format version", str(info.get("format_version", ""))],
+        ["Prefetch hash", hex(info.get("prefetch_hash") or 0)],
+        ["Installer?", "YES — installer ≠ app was used" if info.get("is_installer") else "no"],
+    ]
+    for i, t in enumerate((info.get("last_runs_utc") or [])[:8]):
+        rows.append([f"Run time [{i}] UTC", t])
+    for p in (info.get("interesting_paths") or [])[:30]:
+        rows.append(["Referenced (notable)", p])
+    if info.get("error"):
+        rows.append(["Parse note", str(info.get("error"))])
+    note = info.get("note") or "Windows Prefetch — execution evidence"
+    return AccessorResult(
+        accessor="prefetch",
+        label="Prefetch",
+        extension=extension_of(path) or "pf",
+        mime="application/x-windows-prefetch",
+        mode="table",
+        columns=["Field", "Value"],
+        rows=rows,
+        size=len(data),
+        kind="prefetch",
+        note=note,
+        text=prefetch_summary_text(info),
+        items=info.get("filenames") or [],
+    )
+
+
+def _recycle_result(path: str, data: bytes) -> AccessorResult:
+    from tforensic.meta_format import parse_recycle_i
+
+    parsed = parse_recycle_i(data)
+    if not parsed:
+        return _text_result(path, data, "hex")
+    rows = [
+        ["Deleted (UTC)", parsed.get("deleted_utc") or "?"],
+        ["Original path", parsed.get("original_path") or "?"],
+        ["Original size", str(parsed.get("original_size"))],
+        ["$I version", str(parsed.get("version"))],
+        ["FILETIME raw", str(parsed.get("deleted_filetime"))],
+    ]
+    note = (
+        f"Recycle Bin delete record — {parsed.get('deleted_utc') or 'time unknown'}"
+    )
+    return AccessorResult(
+        accessor="recycle",
+        label="Recycle Bin $I",
+        extension=extension_of(path),
+        mime="application/x-recycle-i",
+        mode="table",
+        columns=["Field", "Value"],
+        rows=rows,
+        size=len(data),
+        kind="recycle",
+        note=note,
+        text=(
+            f"Deleted: {parsed.get('deleted_utc')}\n"
+            f"Original: {parsed.get('original_path')}\n"
+            f"Size: {parsed.get('original_size')}"
+        ),
+    )
 
 
 def _info_result(path: str, data: bytes, accessor: str, note: str) -> AccessorResult:
@@ -325,7 +567,13 @@ def _info_result(path: str, data: bytes, accessor: str, note: str) -> AccessorRe
     )
 
 
-def open_with_accessor(path: str, data: bytes, force: Optional[str] = None) -> AccessorResult:
+def open_with_accessor(
+    path: str,
+    data: bytes,
+    force: Optional[str] = None,
+    *,
+    system_data: Optional[bytes] = None,
+) -> AccessorResult:
     """Open file bytes with the accessor for its extension (or forced accessor)."""
     acc = force or accessor_for(path, data)
 
@@ -337,6 +585,16 @@ def open_with_accessor(path: str, data: bytes, force: Optional[str] = None) -> A
         return _archive_result(path, data)
     if acc == "sqlite":
         return _sqlite_result(path, data)
+    if acc == "recycle":
+        return _recycle_result(path, data)
+    if acc == "prefetch":
+        return _prefetch_result(path, data)
+    if acc == "shellbags":
+        return _shellbags_result(path, data)
+    if acc == "sam":
+        return _sam_result(path, data, system_data)
+    if acc == "exif":
+        return _exif_result(path, data)
     if acc == "pe":
         r = _text_result(path, data, "pe")
         r.mode = "hex"
@@ -376,7 +634,7 @@ def open_with_accessor(path: str, data: bytes, force: Optional[str] = None) -> A
 
 
 def accessor_to_dict(r: AccessorResult) -> dict:
-    return {
+    d = {
         "accessor": r.accessor,
         "label": r.label,
         "extension": r.extension,
@@ -395,6 +653,10 @@ def accessor_to_dict(r: AccessorResult) -> dict:
         "executable": r.executable,
         "note": r.note,
     }
+    if r.mode == "sqlite-browser" or r.kind == "sqlite":
+        d["browser"] = True
+        d["tables"] = r.items
+    return d
 
 
 def list_accessors() -> list[dict]:
