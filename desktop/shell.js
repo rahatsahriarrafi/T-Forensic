@@ -273,9 +273,13 @@ window.tforensic.onOpenProgress?.((p) => {
 window.tforensic.onOpenError?.((err) => {
   hideBusy();
   meta.textContent = "Open failed";
+  const msg = [err.message || "Unknown error"];
+  if (err.detail && err.detail !== err.message) {
+    msg.push(String(err.detail).slice(0, 240));
+  }
   toast({
     title: err.title || "Could not open image",
-    message: err.message || "Unknown error",
+    message: msg.join(" — "),
     suggestion: err.suggestion || "",
     kind: "err",
   });

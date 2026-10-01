@@ -64,41 +64,79 @@ function explainOpenFailure(raw, imagePath) {
   const low = text.toLowerCase();
   const ext = path.extname(imagePath || "").toLowerCase();
   let title = "Could not open image";
-  let message = text.split("\n").find((l) => l.startsWith("error:")) || text;
-  message = message.replace(/^error:\s*/i, "").trim() || text.trim() || "Unknown error";
+  let message = text.split("\n").find((l) => /^error:/i.test(l)) || "";
+  message = message.replace(/^error:\s*/i, "").trim();
+  const detailLine = text.split("\n").find((l) => /^detail:/i.test(l));
+  const detail = detailLine ? detailLine.replace(/^detail:\s*/i, "").trim() : "";
+  // Prefer real exception text when CLI only emitted a generic "error:" line
+  if (
+    detail &&
+    (!message ||
+      /^opening the image failed\.?$/i.test(message) ||
+      /^could not open evidence\.?$/i.test(message) ||
+      message.length < 24)
+  ) {
+    message = detail;
+  }
+  if (!message) message = text.trim() || "Unknown error";
+
   let suggestion =
-    text.split("\n").find((l) => l.startsWith("hint:")) || "";
+    text.split("\n").find((l) => /^hint:/i.test(l)) || "";
   suggestion = suggestion.replace(/^hint:\s*/i, "").trim();
 
   if (!suggestion) {
-    if (low.includes("xmount") && (low.includes("not found") || low.includes("no such"))) {
+    if (low.includes("xmount") && (low.includes("not found") || low.includes("no such") || low.includes("missing"))) {
       title = "xmount missing";
       suggestion = "Install: sudo apt install xmount";
-    } else if (low.includes("qemu-img")) {
+    } else if (low.includes("qemu-img") || low.includes("qemu-utils")) {
       title = "qemu-img missing";
       suggestion = "Install: sudo apt install qemu-utils";
     } else if (low.includes("sleuthkit") || low.includes("mmls") || low.includes("fls")) {
       title = "Sleuth Kit missing";
       suggestion = "Install: sudo apt install sleuthkit";
+    } else if (low.includes("externally-managed") || low.includes("impacket") || low.includes("requirements")) {
+      title = "Python deps missing";
+      suggestion = "From the repo: ./install.sh   (creates .venv on Kali)";
     } else if (low.includes("timed out") || low.includes("timeout")) {
       title = "Taking too long";
       suggestion = ext === ".ova"
         ? "OVA extract/convert can take many minutes. Retry with more free space in /tmp."
         : "Retry; ensure the image is local (not a slow network path).";
-    } else if (low.includes("requirements blocked") || low.includes("requirements.txt")) {
-      title = "requirements.txt not installed";
-      suggestion = "Run: pip install -r requirements.txt   then restart TFF";
-    } else if (low.includes("python") || low.includes("enoent")) {
+    } else if (low.includes("python") || low.includes("enoent") || low.includes("no module named")) {
       title = "Python engine failed";
-      suggestion = "Install Python 3 and run from the project: python3 -m tforensic serve <image>";
+      suggestion = "Run: cd T-Forensic && ./install.sh && tforensic deps";
     } else if (low.includes("unsupported") || low.includes("not an ad1")) {
       title = "Unsupported or invalid image";
-      suggestion = "Check Formats tab. Use .ad1 / .E01 / .dd / .ova / .vdi / .qcow2.";
+      suggestion = "Check Formats tab. Use .ad1 / .E01 / .dd / .ova / .vdi / .qcow2 / .pcap.";
     } else {
-      suggestion = "Confirm the file path, install xmount (+ qemu-utils for OVA/VMDK), then retry.";
+      suggestion =
+        "Run in a terminal: tforensic deps\n" +
+        "Then: sudo apt install xmount sleuthkit qemu-utils\n" +
+        "Retry open, or: tforensic serve /path/to/image";
     }
   }
-  return { title, message: message.slice(0, 400), suggestion };
+
+  // Persist for support (menu launch log dir)
+  try {
+    const logDir = path.join(os.homedir(), ".cache", "tforensic");
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(
+      path.join(logDir, "open-errors.log"),
+      `\n======== ${new Date().toISOString()} ========\n` +
+        `image: ${imagePath || "?"}\n` +
+        `title: ${title}\n` +
+        `message: ${message}\n` +
+        `suggestion: ${suggestion}\n` +
+        `raw:\n${text}\n`
+    );
+  } catch (_) {}
+
+  return {
+    title,
+    message: message.slice(0, 600),
+    suggestion,
+    detail: (detail || text).slice(0, 1200),
+  };
 }
 
 function progressForLine(line, imagePath) {
@@ -471,7 +509,10 @@ async function ipcOpenImage(filePath) {
     sendOpenError(friendly);
     dialog.showErrorBox(
       friendly.title,
-      `${friendly.message}\n\nTry: ${friendly.suggestion}`
+      `${friendly.message}\n\nTry: ${friendly.suggestion}` +
+        (friendly.detail && friendly.detail !== friendly.message
+          ? `\n\nDetail:\n${friendly.detail.slice(0, 500)}`
+          : "")
     );
     return { ok: false, error: friendly };
   }

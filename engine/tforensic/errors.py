@@ -172,10 +172,12 @@ def explain_exception(exc: BaseException, context: str = "") -> UserError:
             msg,
         )
     if ctx == "open" or ctx == "serve":
+        short = msg if len(msg) < 220 else msg[:217] + "…"
         return ue(
             "Could not open evidence",
-            "Opening the image failed.",
-            "Check Formats tab for supported types. For disk/OVA need xmount (+ qemu-utils for OVA/VMDK).",
+            short or "Opening the image failed.",
+            "Check Formats tab. Disk/OVA need: sudo apt install xmount sleuthkit qemu-utils. "
+            "Then: tforensic deps",
             msg,
         )
     return ue(
