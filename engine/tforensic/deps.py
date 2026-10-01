@@ -1,20 +1,28 @@
 """Runtime dependency probe — report missing tools with install suggestions."""
 from __future__ import annotations
 
-import importlib.util
+import os
+import re
 import shutil
+import importlib.util
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Optional
+
+# PyPI name → import module (requirements.txt uses PyPI names)
+_PIP_IMPORT = {
+    "impacket": "impacket",
+}
 
 
 @dataclass
 class Dep:
     id: str
     name: str
-    kind: str  # core | feature | optional
+    kind: str  # required | feature | optional
     feature: str
     ok: bool
-    check: str  # how we probed
+    check: str
     suggestion: str
     apt: str = ""
     pip: str = ""
@@ -31,26 +39,130 @@ def _bin(name: str) -> bool:
     return bool(shutil.which(name))
 
 
+def requirements_txt_path() -> Path:
+    """Repo-root requirements.txt (engine/tforensic/deps.py → repo root)."""
+    return Path(__file__).resolve().parents[2] / "requirements.txt"
+
+
+def _parse_requirement_name(line: str) -> Optional[str]:
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    line = line.split(";", 1)[0].strip()
+    m = re.match(r"^([A-Za-z0-9_.-]+)", line)
+    return m.group(1).lower().replace("_", "-") if m else None
+
+
+def check_requirements_txt() -> dict[str, Any]:
+    """Verify every package in requirements.txt is importable. Hard gate for startup."""
+    path = requirements_txt_path()
+    missing: list[dict[str, str]] = []
+    packages: list[dict[str, Any]] = []
+
+    if not path.is_file():
+        return {
+            "ok": False,
+            "path": str(path),
+            "packages": [],
+            "missing": [
+                {
+                    "name": "requirements.txt",
+                    "suggestion": f"Missing {path} — clone the full repo or restore requirements.txt",
+                }
+            ],
+            "install": "pip install -r requirements.txt",
+            "message": f"requirements.txt not found at {path}",
+        }
+
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        name = _parse_requirement_name(raw)
+        if not name:
+            continue
+        mod = _PIP_IMPORT.get(name, name.replace("-", "_"))
+        ok = _has_mod(mod)
+        packages.append({"name": name, "module": mod, "ok": ok, "spec": raw.strip()})
+        if not ok:
+            missing.append(
+                {
+                    "name": name,
+                    "module": mod,
+                    "suggestion": f"pip install -r requirements.txt   # needs: {name}",
+                }
+            )
+
+    ok = len(missing) == 0
+    return {
+        "ok": ok,
+        "path": str(path),
+        "packages": packages,
+        "missing": missing,
+        "install": "pip install -r requirements.txt",
+        "message": (
+            "requirements.txt satisfied."
+            if ok
+            else "TFF will not start until requirements.txt is installed."
+        ),
+    }
+
+
+def format_requirements_block(req: Optional[dict[str, Any]] = None) -> str:
+    req = req or check_requirements_txt()
+    lines = [
+        "REQUIREMENTS BLOCKED — install Python packages first:",
+        f"  {req.get('install') or 'pip install -r requirements.txt'}",
+        f"  (file: {req.get('path')})",
+        "",
+    ]
+    for m in req.get("missing") or []:
+        lines.append(f"  missing: {m.get('name')}")
+        if m.get("suggestion"):
+            lines.append(f"    → {m['suggestion']}")
+    lines.append("")
+    lines.append("Then re-run. Check status:  tforensic deps")
+    return "\n".join(lines)
+
+
+def ensure_requirements() -> tuple[bool, str]:
+    """Return (ok, message). TFOR_SKIP_REQ=1 bypasses (emergency only)."""
+    if os.environ.get("TFOR_SKIP_REQ", "").strip().lower() in ("1", "true", "yes"):
+        return True, "TFOR_SKIP_REQ set — skipping requirements.txt gate"
+    req = check_requirements_txt()
+    if req["ok"]:
+        return True, req["message"]
+    return False, format_requirements_block(req)
+
+
 def check_dependencies() -> dict[str, Any]:
     """Return full dependency report with missing items + install lines."""
+    req = check_requirements_txt()
     deps: list[Dep] = [
         Dep(
             id="python3",
             name="Python 3.9+",
-            kind="core",
+            kind="required",
             feature="Engine / CLI / API",
-            ok=True,  # if we are running, python works
+            ok=True,
             check="runtime",
             suggestion="Already running under this interpreter.",
         ),
         Dep(
+            id="requirements.txt",
+            name="requirements.txt (pip)",
+            kind="required",
+            feature="Must be installed before TFF will start",
+            ok=req["ok"],
+            check=str(req.get("path") or "requirements.txt"),
+            suggestion=req.get("install") or "pip install -r requirements.txt",
+            pip="see requirements.txt",
+        ),
+        Dep(
             id="impacket",
             name="impacket",
-            kind="feature",
-            feature="SAM / NTLM dump + password crack helper",
+            kind="required",
+            feature="Listed in requirements.txt (SAM / NTLM)",
             ok=_has_mod("impacket"),
             check="import impacket",
-            suggestion="pip install -r requirements.txt   # or: pip install impacket",
+            suggestion="pip install -r requirements.txt",
             pip="impacket>=0.11.0",
         ),
         Dep(
@@ -186,7 +298,7 @@ def check_dependencies() -> dict[str, Any]:
     ]
 
     missing = [d for d in deps if not d.ok]
-    missing_core = [d for d in missing if d.kind == "core"]
+    missing_required = [d for d in missing if d.kind == "required"]
     missing_feature = [d for d in missing if d.kind == "feature"]
     missing_optional = [d for d in missing if d.kind == "optional"]
 
@@ -196,12 +308,13 @@ def check_dependencies() -> dict[str, Any]:
         for p in (d.apt or "").split():
             if p and p not in apt_pkgs:
                 apt_pkgs.append(p)
-        if d.pip and d.pip not in pip_pkgs:
+        if d.pip and d.pip not in pip_pkgs and d.pip != "see requirements.txt":
             pip_pkgs.append(d.pip)
 
     install_lines: list[str] = []
-    if pip_pkgs:
+    if not req["ok"] or pip_pkgs:
         install_lines.append("pip install -r requirements.txt")
+    if pip_pkgs:
         install_lines.append("pip install " + " ".join(pip_pkgs))
     if apt_pkgs:
         install_lines.append("sudo apt install " + " ".join(apt_pkgs))
@@ -219,19 +332,25 @@ def check_dependencies() -> dict[str, Any]:
         for d in missing
     ]
 
-    ready = len(missing_core) == 0  # core always ok today; AD1 works without extras
     return {
-        "ok": ready,
+        "ok": req["ok"] and len(missing_required) == 0,
+        "requirements_ok": req["ok"],
+        "requirements": req,
         "complete": len(missing) == 0,
         "summary": (
             "All recommended tools present."
             if not missing
-            else f"{len(missing)} missing — install to unlock full features."
+            else (
+                "BLOCKED: install requirements.txt before TFF will start."
+                if not req["ok"]
+                else f"{len(missing)} missing — install to unlock full features."
+            )
         ),
         "counts": {
             "total": len(deps),
             "ok": sum(1 for d in deps if d.ok),
             "missing": len(missing),
+            "missing_required": len(missing_required),
             "missing_feature": len(missing_feature),
             "missing_optional": len(missing_optional),
         },
@@ -243,8 +362,8 @@ def check_dependencies() -> dict[str, Any]:
             "commands": install_lines,
         },
         "hint": (
-            "Run: tforensic deps   ·   or open Formats / status banner in the UI. "
-            "Re-check anytime — suggestions stay until packages are installed."
+            "REQUIRED first: pip install -r requirements.txt — TFF refuses to start without it. "
+            "Then: tforensic deps for optional system tools."
         ),
     }
 
@@ -256,8 +375,11 @@ def format_deps_text(report: Optional[dict[str, Any]] = None) -> str:
         report["summary"],
         "",
     ]
+    if not report.get("requirements_ok", True):
+        lines.append(format_requirements_block(report.get("requirements")))
+        lines.append("")
     for d in report["deps"]:
-        mark = "OK " if d["ok"] else "MISS"
+        mark = "OK " if d["ok"] else ("REQ" if d["kind"] == "required" else "MISS")
         lines.append(f"  [{mark}] {d['name']:28} · {d['feature']}")
         if not d["ok"]:
             lines.append(f"         → {d['suggestion']}")

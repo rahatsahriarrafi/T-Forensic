@@ -1109,6 +1109,13 @@ def serve(
     cache: Optional[str] = None,
 ) -> int:
     global CASE, WEB_DIR
+    from tforensic.deps import ensure_requirements
+
+    ok, msg = ensure_requirements()
+    if not ok:
+        print(msg, file=sys.stderr)
+        return 3
+
     WEB_DIR = os.path.abspath(web_dir or default_web_dir())
     if not os.path.isdir(WEB_DIR):
         print(f"error: web dir not found: {WEB_DIR}", file=sys.stderr)

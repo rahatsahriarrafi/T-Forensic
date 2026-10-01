@@ -227,7 +227,12 @@ def cmd_close(args):
 
 def cmd_serve(args):
     from tforensic.api.server import serve
-    from tforensic.deps import check_dependencies, format_deps_text
+    from tforensic.deps import check_dependencies, ensure_requirements, format_deps_text
+
+    ok, msg = ensure_requirements()
+    if not ok:
+        print(msg, file=sys.stderr)
+        return 3
 
     report = check_dependencies()
     if report["counts"]["missing"]:
@@ -638,6 +643,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
+    # Allow `deps` / `deps --json` without requirements so users can discover the fix.
+    cmd = next((a for a in argv if not a.startswith("-")), None)
+    if cmd not in (None, "deps"):
+        from tforensic.deps import ensure_requirements
+
+        ok, msg = ensure_requirements()
+        if not ok:
+            print(msg, file=sys.stderr)
+            return 3
+
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

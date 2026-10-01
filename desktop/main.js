@@ -85,6 +85,9 @@ function explainOpenFailure(raw, imagePath) {
       suggestion = ext === ".ova"
         ? "OVA extract/convert can take many minutes. Retry with more free space in /tmp."
         : "Retry; ensure the image is local (not a slow network path).";
+    } else if (low.includes("requirements blocked") || low.includes("requirements.txt")) {
+      title = "requirements.txt not installed";
+      suggestion = "Run: pip install -r requirements.txt   then restart TFF";
     } else if (low.includes("python") || low.includes("enoent")) {
       title = "Python engine failed";
       suggestion = "Install Python 3 and run from the project: python3 -m tforensic serve <image>";

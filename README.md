@@ -68,16 +68,18 @@ In the web/desktop UI, open the **Disk** tab to mount E01/raw/VDI/…, list part
 
 ## Quick start (CLI / web — no Electron)
 
+**TFF will not start until `requirements.txt` is installed.**
+
 ```bash
 cd Project_T-Forensic
-python3 -m pip install -r requirements.txt
+python3 -m pip install -r requirements.txt   # REQUIRED — app refuses to run without this
 # optional system tools (disk/PCAP/SAM/prefetch/…):
 #   sudo apt install $(grep -v '^#' requirements-system.txt | tr '\n' ' ')
 
 export PYTHONPATH="$PWD/engine"
 export PATH="$PWD/scripts:$PATH"
 
-# See what’s missing (prints install commands; exit 2 if incomplete)
+# See what’s missing (always works — even before pip install)
 tforensic deps
 
 # AD1 logical image
@@ -89,7 +91,7 @@ tforensic serve /path/to/disk.dd --port 8000
 ```
 
 The web UI also shows a **continuous missing-tools banner** (`/api/deps`) that
-refreshes every ~45s until packages are installed.
+refreshes every ~45s until optional system packages are installed.
 
 Optional install as a package:
 
