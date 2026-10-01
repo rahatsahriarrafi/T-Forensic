@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Launch Electron desktop shell (installs deps on first run if needed).
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Follow ~/.local/bin/tforensic-desktop → …/scripts/run-desktop.sh
+_SCRIPT="$(readlink -f "${BASH_SOURCE[0]:-$0}")"
+ROOT="$(cd "$(dirname "$_SCRIPT")/.." && pwd)"
 
 export PYTHONPATH="${ROOT}/engine${PYTHONPATH:+:$PYTHONPATH}"
 export PATH="${HOME}/.local/bin:${ROOT}/scripts:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
@@ -30,7 +32,12 @@ if [[ ! -x "$ELECTRON_BIN" ]]; then
     echo "error: npm/node not found — install Node.js, then re-run ./update.sh" >&2
     exit 4
   fi
-  npm install
+  # Prefer helper when present
+  if [[ -x "${ROOT}/scripts/desktop-npm-install.sh" ]]; then
+    "${ROOT}/scripts/desktop-npm-install.sh"
+  else
+    npm install
+  fi
 fi
 if [[ ! -x "$ELECTRON_BIN" ]]; then
   echo "error: Electron binary missing after npm install: $ELECTRON_BIN" >&2

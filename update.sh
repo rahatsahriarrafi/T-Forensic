@@ -4,7 +4,8 @@
 #        (from repo root):             ./update.sh
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+_SCRIPT="$(readlink -f "${BASH_SOURCE[0]:-$0}")"
+ROOT="$(cd "$(dirname "$_SCRIPT")" && pwd)"
 cd "$ROOT"
 
 if [[ ! -d "$ROOT/.git" ]]; then

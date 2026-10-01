@@ -2,6 +2,7 @@
 # Install Python requirements into the active environment (venv or user).
 # Usage: install-python-reqs.sh /path/to/requirements.txt
 set -euo pipefail
+_SCRIPT="$(readlink -f "${BASH_SOURCE[0]:-$0}")"
 REQ="${1:?requirements.txt path required}"
 
 if [[ ! -f "$REQ" ]]; then

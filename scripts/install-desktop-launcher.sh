@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Install "T Forensic" into the desktop application menu + system icon theme.
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+_SCRIPT="$(readlink -f "${BASH_SOURCE[0]:-$0}")"
+ROOT="$(cd "$(dirname "$_SCRIPT")/.." && pwd)"
 APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 # Prefer ~/.icons — ~/.local/share/icons is sometimes root-owned on Kali/custom images.
 ICON_BASE="${HOME}/.icons/hicolor"

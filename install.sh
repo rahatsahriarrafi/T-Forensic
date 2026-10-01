@@ -6,7 +6,8 @@
 # - registers "T Forensic" in the desktop application menu
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+_SCRIPT="$(readlink -f "${BASH_SOURCE[0]:-$0}")"
+ROOT="$(cd "$(dirname "$_SCRIPT")" && pwd)"
 cd "$ROOT"
 
 echo "==> TFF install from: $ROOT"

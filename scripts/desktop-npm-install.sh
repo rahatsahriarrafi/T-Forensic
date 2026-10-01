@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Install desktop npm deps; node-pty is optional (embedded terminal only).
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+_SCRIPT="$(readlink -f "${BASH_SOURCE[0]:-$0}")"
+ROOT="$(cd "$(dirname "$_SCRIPT")/.." && pwd)"
 DESKTOP="$ROOT/desktop"
 
 if ! command -v npm >/dev/null 2>&1; then

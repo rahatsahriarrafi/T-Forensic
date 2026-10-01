@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # App-menu launcher. Never fails silently: logs + desktop error dialog.
 set -u
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+_SCRIPT="$(readlink -f "${BASH_SOURCE[0]:-$0}")"
+ROOT="$(cd "$(dirname "$_SCRIPT")/.." && pwd)"
 LOG_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tforensic"
 LOG="$LOG_DIR/launch.log"
 mkdir -p "$LOG_DIR"
