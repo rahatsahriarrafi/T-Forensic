@@ -15,9 +15,9 @@ Writable work uses:
 
 ## Pieces
 
-1. **Plugins** — Python classes under `~/.tforensic/plugins/` or built-ins (`hash_sweep`, `strings_hunt`, `timeline_export`, `correlate`)
-2. **Lab** — `tforensic lab enable [--virtual-write]`
-3. **Playbooks** — JSON pipelines (`quick_triage`, `deep_lab`)
+1. **Plugins** - Python classes under `~/.tforensic/plugins/` or built-ins (`hash_sweep`, `strings_hunt`, `timeline_export`, `correlate`)
+2. **Lab** - `tforensic lab enable [--virtual-write]`
+3. **Playbooks** - JSON pipelines (`quick_triage`, `deep_lab`)
 
 ## CLI
 

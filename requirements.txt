@@ -1,6 +1,6 @@
-# Team Forensic Framework (TFF) — ALL installable requirements
+# Team Forensic Framework (TFF) - ALL installable requirements
 #
-# ONE COMMAND (installs Python + system tools — no manual downloads):
+# ONE COMMAND (installs Python + system tools - no manual downloads):
 #   ./install.sh
 #   ./update.sh
 #   ./scripts/install-all-reqs.sh

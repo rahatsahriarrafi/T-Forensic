@@ -1,4 +1,4 @@
-# TFF desktop (Electron) — supported platforms and build notes
+# TFF desktop (Electron) - supported platforms and build notes
 
 ## Is Linux x86_64 supported?
 
@@ -13,7 +13,7 @@ The UI and Python engine do **not** depend on `node-pty`. Only the **embedded te
 | **OS** | Kali / Debian / Ubuntu **amd64** | Other Linux amd64 distros usually work |
 | **Node.js** | **20.x LTS** or **22.x LTS** | Avoid **Node 24+** for `npm install` in `desktop/` until you use the optional native rebuild flow below |
 | **npm** | **10+** (bundled with Node 20/22) | npm 12 on Node 24 is what many users hit when builds fail |
-| **Python (TFF engine)** | **3.11 – 3.12** (3.13+ often OK) | `pip install -r requirements.txt` — this is separate from `node-gyp` |
+| **Python (TFF engine)** | **3.11 – 3.12** (3.13+ often OK) | `pip install -r requirements.txt` - this is separate from `node-gyp` |
 | **Python (node-gyp only)** | **3.11 or 3.12** + **setuptools** | Python **3.12+** removed stdlib `distutils`; old **node-gyp 9** still imports it unless setuptools is installed or you point npm at another Python |
 | **Electron** | **33.x** (see `desktop/package.json`) | Installed locally under `desktop/node_modules` |
 
@@ -21,14 +21,14 @@ We develop and smoke-test on **Kali amd64** with **Node 20/22** and **Python 3.1
 
 ## What `node-pty` / `node-gyp` are for
 
-- **`node-pty`** — native addon for the in-app terminal.
-- **`node-gyp`** — compiles that addon when no matching **prebuild** exists (common on **Node 24** or very new Python).
+- **`node-pty`** - native addon for the in-app terminal.
+- **`node-gyp`** - compiles that addon when no matching **prebuild** exists (common on **Node 24** or very new Python).
 
 If `node-pty` is not built, the desktop app **still runs** (open evidence, tree, disk, PCAP, etc.). The terminal shows a message and you can use a normal shell: `tforensic`, `tforensic serve`, `tforensic-desktop` from a terminal.
 
 As of **v0.3.3**, `node-pty` is an **optional** npm dependency so `npm install` in `desktop/` can succeed even when the native build fails.
 
-## Kali Linux — install desktop (recommended)
+## Kali Linux - install desktop (recommended)
 
 From the repo root:
 
@@ -78,8 +78,8 @@ cd T-Forensic && ./update.sh
 
 ## Versions we do **not** recommend changing blindly
 
-- **`electron`** — keep aligned with `desktop/package.json` (^33.x).
-- **`node-pty`** — keep ^1.0.0; use **electron-rebuild**, do not randomly downgrade Electron.
+- **`electron`** - keep aligned with `desktop/package.json` (^33.x).
+- **`node-pty`** - keep ^1.0.0; use **electron-rebuild**, do not randomly downgrade Electron.
 
 ## Quick answers (for GitHub issues)
 
@@ -87,7 +87,7 @@ cd T-Forensic && ./update.sh
 2. **Recommended Node?** **20 LTS or 22 LTS** for smoothest `npm install`.
 3. **Recommended Python?** **3.11–3.12** for the **forensic engine**; for **node-gyp**, same or setuptools + optional `npm config set python`.
 4. **Recommended node-gyp?** Whatever **npm** pulls in; fix the environment (Node version, `build-essential`, `python3-setuptools`, `electron-rebuild`) rather than pinning node-gyp in this repo.
-5. **`npm install` failed on node-pty?** Upgrade to **v0.3.3+**, re-run `./update.sh` — app should work without terminal; then follow **embedded terminal** steps above if needed.
+5. **`npm install` failed on node-pty?** Upgrade to **v0.3.3+**, re-run `./update.sh` - app should work without terminal; then follow **embedded terminal** steps above if needed.
 
 ## Logs
 

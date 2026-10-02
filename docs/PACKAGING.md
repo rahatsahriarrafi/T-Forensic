@@ -1,4 +1,4 @@
-# Packaging / install — Team Forensic Framework (TFF)
+# Packaging / install - Team Forensic Framework (TFF)
 
 ## Fast path (GitHub clone → same desktop app)
 
@@ -10,7 +10,7 @@ cd T-Forensic
 
 This will:
 
-1. `pip install -r requirements.txt` (**required** — TFF will not start without it)
+1. `pip install -r requirements.txt` (**required** - TFF will not start without it)
 2. `sudo apt install …` packages from `requirements-system.txt` (skip with `TFF_SKIP_APT=1`)
 3. `npm install` in `desktop/` (via `scripts/desktop-npm-install.sh`; see [DESKTOP.md](DESKTOP.md))
 4. Register **T Forensic** in your application menu (`~/.local/share/applications/`)

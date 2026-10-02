@@ -4,7 +4,7 @@ AD1-first forensic **analysis framework** by **Team NullX**: CLI + web UI + Elec
 with Autopsy-class cases, plugins, playbooks, Network/PCAP, and a writable **lab** sandbox.
 
 **Evidence images stay immutable.** Analysis writes go to `case/lab/`, xmount
-virtual-write cache, exports, and reports — never the source image.
+virtual-write cache, exports, and reports - never the source image.
 
 **Owner:** [rahatsahriarrafi](https://github.com/rahatsahriarrafi) · **Team NullX**
 
@@ -29,7 +29,7 @@ git clone https://github.com/rahatsahriarrafi/T-Forensic.git
 cd T-Forensic
 ./install.sh
 
-# later — one command to newest version
+# later - one command to newest version
 ./update.sh
 ```
 
@@ -92,7 +92,7 @@ In the web/desktop UI, open the **Disk** tab to mount E01/raw/VDI/…, list part
 
 - Open AccessData **AD1** logical images
 - **CLI** (`tree`, `cat`, `hex`, `export`, `hash`, `find`, `artifacts`, `meta`)
-- **Smart preview** (UTF-8 / UTF-16 LE·BE / latin-1; PE → hex — no garbage text dumps)
+- **Smart preview** (UTF-8 / UTF-16 LE·BE / latin-1; PE → hex - no garbage text dumps)
 - **Local web UI** (tree, findings, preview, hex, metadata, hashes, export)
 - **Electron shell** auto-starts the Python engine on loopback, embeds the UI, and offers an in-app terminal
 - Session temp under `/tmp/tforensic-sessions/<id>/` (override with `TFOR_SESSION_ROOT`)
@@ -103,11 +103,11 @@ See the [Commands table at the top](#commands-install--update) and **[COMMANDS.m
 
 **TFF will not start until `requirements.txt` is installed** (`./install.sh` / `./update.sh` do this).
 
-## Quick start (CLI / web — no Electron)
+## Quick start (CLI / web - no Electron)
 
 ```bash
 cd T-Forensic
-python3 -m pip install -r requirements.txt   # REQUIRED (or ./install.sh — creates .venv on Kali)
+python3 -m pip install -r requirements.txt   # REQUIRED (or ./install.sh - creates .venv on Kali)
 # optional: sudo apt install $(grep -vE '^\s*(#|$)' requirements-system.txt | tr '\n' ' ')
 
 export PYTHONPATH="$PWD/engine"
@@ -125,7 +125,7 @@ Optional: `pip install -e ./engine`
 ## Desktop (Electron)
 
 ```bash
-./install.sh                 # recommended — menu entry + deps
+./install.sh                 # recommended - menu entry + deps
 # or just:
 ./scripts/run-desktop.sh
 ```
@@ -134,7 +134,7 @@ First run runs `npm install` in `desktop/` (needs **Node.js 20 or 22 LTS** recom
 
 1. Spawns `python3 -m tforensic serve` on an ephemeral loopback port
 2. Loads the UI in an iframe
-3. Can open an embedded terminal (`node-pty` + xterm) with `scripts/tforensic` on `PATH` — optional; see [docs/DESKTOP.md](docs/DESKTOP.md) for Kali / Node 24 / Python 3.14 build notes
+3. Can open an embedded terminal (`node-pty` + xterm) with `scripts/tforensic` on `PATH` - optional; see [docs/DESKTOP.md](docs/DESKTOP.md) for Kali / Node 24 / Python 3.14 build notes
 
 ## Tests
 
@@ -168,7 +168,7 @@ tests/              unit tests
 
 ## License
 
-**MIT** — see [LICENSE](LICENSE).
+**MIT** - see [LICENSE](LICENSE).
 
 **Team Forensic Framework (TFF)** is an official **Team NullX** product,
 created and maintained by **[rahatsahriarrafi](https://github.com/rahatsahriarrafi)**.

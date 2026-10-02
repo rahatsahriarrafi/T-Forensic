@@ -1,4 +1,4 @@
-# Team Forensic Framework (TFF) — system packages (Debian/Kali/Ubuntu)
+# Team Forensic Framework (TFF) - system packages (Debian/Kali/Ubuntu)
 # Auto-installed by ./install.sh and ./update.sh (via scripts/install-all-reqs.sh).
 # No manual download needed when users follow those commands.
 # Skip:  TFF_SKIP_APT=1 ./update.sh
