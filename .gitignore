@@ -34,6 +34,7 @@ npm-debug.log*
 .DS_Store
 .idea/
 .vscode/
+.cursor/
 *.swp
 .pytest_cache/
 
