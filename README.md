@@ -168,4 +168,7 @@ tests/              unit tests
 
 ## License
 
-MIT
+**MIT** — see [LICENSE](LICENSE).
+
+**Team Forensic Framework (TFF)** is an official **Team NullX** product,
+created and maintained by **[rahatsahriarrafi](https://github.com/rahatsahriarrafi)**.
