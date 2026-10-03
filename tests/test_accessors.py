@@ -22,6 +22,24 @@ class TestAccessors(unittest.TestCase):
         self.assertEqual(accessor_for("app.exe"), "pe")
         self.assertEqual(accessor_for("hist.sqlite"), "sqlite")
         self.assertEqual(accessor_for("Windows/System32/config/SAM"), "sam")
+        self.assertEqual(accessor_for("clip.MOD"), "media")
+        self.assertEqual(accessor_for("tape.tod"), "media")
+
+    def test_mod_mpeg_ps(self):
+        # Minimal MPEG-2 Program Stream pack header (camcorder .MOD)
+        data = b"\x00\x00\x01\xba" + b"\x00" * 32
+        self.assertEqual(accessor_for("MOV001.MOD", data), "media")
+        r = open_with_accessor("MOV001.MOD", data)
+        self.assertEqual(r.accessor, "media")
+        self.assertIn("MPEG", r.note)
+
+    def test_mod_tracker_music(self):
+        data = bytearray(1084)
+        data[1080:1084] = b"M.K."
+        self.assertEqual(accessor_for("song.mod", bytes(data)), "hex")
+        r = open_with_accessor("song.mod", bytes(data))
+        self.assertEqual(r.mode, "hex")
+        self.assertIn("Tracker", r.note)
 
     def test_png_exif_accessor(self):
         self.assertEqual(accessor_for("pic.PNG"), "exif")

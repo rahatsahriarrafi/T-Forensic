@@ -7,7 +7,11 @@ from typing import Callable, Optional
 from tforensic.casedb import CaseDB
 
 ProgressCB = Callable[[float, str, Optional[float]], None]
-MEDIA = re.compile(r"\.(jpe?g|png|gif|bmp|tiff?|webp|heic|mp4|mov|avi|mkv|wmv)$", re.I)
+MEDIA = re.compile(
+    r"\.(jpe?g|png|gif|bmp|tiff?|webp|heic|mp4|m4v|mov|avi|mkv|wmv|"
+    r"mod|tod|mpg|mpeg|m2ts|mts|ts|vob|3gp)$",
+    re.I,
+)
 
 
 def run(db: CaseDB, evidence_id: str, progress_cb: ProgressCB) -> dict:

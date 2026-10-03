@@ -58,7 +58,13 @@ _reg("archive", "zip", "jar", "apk", "whl", "docx", "xlsx", "pptx", "odt", "ods"
 _reg("sqlite", "sqlite", "sqlite3", "db", "db3")
 _reg("pe", "exe", "dll", "sys", "scr", "com", "cpl", "ocx", "mui", "drv")
 _reg("pdf", "pdf")
-_reg("media", "mp3", "mp4", "wav", "flac", "ogg", "webm", "avi", "mkv", "mov", "m4a")
+# Video/audio + camcorder MPEG Program Stream (.mod/.tod - JVC, Canon, Panasonic, ...)
+_reg(
+    "media",
+    "mp3", "mp4", "wav", "flac", "ogg", "webm", "avi", "mkv", "mov", "m4a",
+    "m4v", "wmv", "mpg", "mpeg", "m2v", "m2t", "m2ts", "mts", "ts", "vob",
+    "mod", "tod", "3gp", "3g2",
+)
 _reg("office", "doc", "xls", "ppt", "rtf")
 _reg("hex", "bin", "dat", "img", "raw", "dump", "evtx", "lnk")
 _reg("prefetch", "pf")
@@ -68,6 +74,38 @@ _reg(
     "erf", "bfr", "rf5", "tpc", "fdc", "enc", "tr1", "5vw", "erp",
     "k12", "vwr", "mplog", "ipfix", "pklg",
 )
+
+# Help stdlib guess MIME for camcorder / MPEG-PS names
+mimetypes.add_type("video/mpeg", ".mod")
+mimetypes.add_type("video/mpeg", ".tod")
+mimetypes.add_type("video/mpeg", ".mpg")
+mimetypes.add_type("video/mpeg", ".mpeg")
+mimetypes.add_type("video/mp2t", ".m2ts")
+mimetypes.add_type("video/mp2t", ".mts")
+mimetypes.add_type("video/mp2t", ".ts")
+
+
+def _looks_like_mpeg_ps(data: bytes) -> bool:
+    """JVC/Canon/Panasonic .MOD and similar MPEG-2 Program Streams."""
+    if len(data) < 4:
+        return False
+    # Pack start: 00 00 01 BA
+    if data[:4] == b"\x00\x00\x01\xba":
+        return True
+    # Sometimes leading zeros / system header before pack
+    idx = data.find(b"\x00\x00\x01\xba")
+    return 0 <= idx <= 64
+
+
+def _looks_like_tracker_mod(data: bytes) -> bool:
+    """Amiga/PC ProTracker-style music modules (also use .mod)."""
+    if len(data) < 1084:
+        return False
+    tag = data[1080:1084]
+    return tag in {
+        b"M.K.", b"M!K!", b"FLT4", b"FLT8", b"4CHN", b"6CHN", b"8CHN",
+        b"OKTA", b"CD81", b"2CHN",
+    }
 
 
 @dataclass
@@ -115,6 +153,13 @@ def accessor_for(path: str, data: bytes | None = None) -> str:
     if uname == "SAM":
         return "sam"
     ext = extension_of(path)
+    # .mod is overloaded: camcorder MPEG-PS (common in DFIR) vs tracker music.
+    # Prefer magic when bytes are available.
+    if ext == "mod" and data is not None:
+        if _looks_like_mpeg_ps(data):
+            return "media"
+        if _looks_like_tracker_mod(data):
+            return "hex"
     if ext in EXT_MAP:
         return EXT_MAP[ext]
     if data is not None:
@@ -130,12 +175,80 @@ def accessor_for(path: str, data: bytes | None = None) -> str:
             return "image"
         if data[:6] in (b"GIF87a", b"GIF89a"):
             return "image"
+        if _looks_like_mpeg_ps(data):
+            return "media"
     return "auto"
 
 
 def mime_for(path: str) -> str:
     mime, _ = mimetypes.guess_type(path)
-    return mime or "application/octet-stream"
+    if mime:
+        return mime
+    ext = extension_of(path)
+    if ext in {"mod", "tod", "mpg", "mpeg", "m2v"}:
+        return "video/mpeg"
+    if ext in {"m2ts", "mts", "ts"}:
+        return "video/mp2t"
+    return "application/octet-stream"
+
+
+def _ffprobe_summary(data: bytes, ext: str) -> str:
+    """Best-effort stream info for media previews (does not modify evidence)."""
+    import shutil
+    import subprocess
+
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe or not data:
+        return ""
+    suffix = f".{ext}" if ext else ".bin"
+    tmp: Optional[str] = None
+    try:
+        fd, tmp = tempfile.mkstemp(prefix="tff-media-", suffix=suffix)
+        os.close(fd)
+        # Cap probe sample so huge MOD/VOB files do not fill /tmp
+        sample = data if len(data) <= 8 * 1024 * 1024 else data[: 8 * 1024 * 1024]
+        with open(tmp, "wb") as f:
+            f.write(sample)
+        raw = subprocess.run(
+            [
+                ffprobe, "-v", "error",
+                "-show_entries", "format=format_name,duration,size,bit_rate:stream=codec_type,codec_name,width,height",
+                "-of", "json",
+                tmp,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=12,
+            check=False,
+        )
+        if raw.returncode != 0 or not raw.stdout.strip():
+            return ""
+        info = json.loads(raw.stdout)
+        fmt = info.get("format") or {}
+        parts = []
+        if fmt.get("format_name"):
+            parts.append(f"container={fmt['format_name']}")
+        if fmt.get("duration"):
+            try:
+                parts.append(f"duration={float(fmt['duration']):.1f}s")
+            except (TypeError, ValueError):
+                pass
+        for s in info.get("streams") or []:
+            kind = s.get("codec_type") or "?"
+            codec = s.get("codec_name") or "?"
+            if kind == "video" and s.get("width") and s.get("height"):
+                parts.append(f"{kind}:{codec} {s['width']}x{s['height']}")
+            else:
+                parts.append(f"{kind}:{codec}")
+        return "ffprobe: " + ", ".join(parts) if parts else ""
+    except Exception:
+        return ""
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 def _text_result(path: str, data: bytes, accessor: str) -> AccessorResult:
@@ -608,10 +721,22 @@ def open_with_accessor(
             "PDF detected — use Download/Export to open in an external PDF reader",
         )
     if acc == "media":
-        return _info_result(
-            path, data, "media",
-            f"Media file ({mime_for(path)}) — export to play with a media player",
-        )
+        ext = extension_of(path)
+        mime = mime_for(path)
+        if ext in {"mod", "tod"} or _looks_like_mpeg_ps(data):
+            note = (
+                f"Camcorder / MPEG Program Stream ({mime or 'video/mpeg'}). "
+                "Export and play with VLC/ffplay, or: ffprobe <exported.mod>"
+            )
+            if _looks_like_mpeg_ps(data):
+                note += " · MPEG pack header detected"
+        else:
+            note = f"Media file ({mime}) - export to play with a media player"
+        # Optional ffprobe summary when the binary is on PATH
+        probe = _ffprobe_summary(data, ext or "bin")
+        if probe:
+            note = f"{note}\n{probe}"
+        return _info_result(path, data, "media", note)
     if acc == "office":
         return _info_result(
             path, data, "office",
@@ -626,6 +751,11 @@ def open_with_accessor(
         r = _text_result(path, data, "hex")
         r.mode = "hex"
         r.text = hexdump(data)
+        if extension_of(path) == "mod" and _looks_like_tracker_mod(data):
+            r.note = (
+                "Tracker music module (ProTracker-style), not camcorder MPEG. "
+                "Shown as hex - export if you need a module player."
+            )
         return r
     if acc in ("text", "markup"):
         return _text_result(path, data, acc)
