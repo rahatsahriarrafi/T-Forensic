@@ -1539,9 +1539,76 @@ function renderAccessor(d, body) {
 
   const pre = document.createElement("pre");
   if (d.mode === "hex") pre.className = "hex";
-  const trunc = d.truncated && d.mode !== "hex" ? `\n\n… [truncated; ${fmtSize(d.size)} total]` : "";
+  const trunc = d.truncated && d.mode !== "hex"
+    ? `\n\n… [showing partial text; ${fmtSize(d.size)} total - use Hex tab or Download for the rest]`
+    : "";
   pre.textContent = (d.text || "") + trunc;
   body.appendChild(pre);
+
+  // Hex paging — walk the entire file (forensic: every byte is in reach)
+  if (d.mode === "hex" && d.size > 0) {
+    const off = d.offset || 0;
+    const win = d.window || 0;
+    const end = Math.min(off + win, d.size);
+    const bar = document.createElement("div");
+    bar.className = "enc";
+    bar.style.display = "flex";
+    bar.style.flexWrap = "wrap";
+    bar.style.gap = "8px";
+    bar.style.alignItems = "center";
+    bar.style.marginTop = "8px";
+    const label = document.createElement("span");
+    label.textContent = `Bytes ${off.toLocaleString()}–${end.toLocaleString()} of ${d.size.toLocaleString()} (${fmtSize(d.size)})`;
+    bar.appendChild(label);
+    const mkBtn = (text, disabled, fn) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = text;
+      b.disabled = !!disabled;
+      b.onclick = fn;
+      bar.appendChild(b);
+      return b;
+    };
+    const step = win > 0 ? win : 1024 * 1024;
+    mkBtn("Prev", off <= 0, () => loadHexOffset(Math.max(0, off - step)));
+    mkBtn("Next", end >= d.size, () => loadHexOffset(end));
+    mkBtn("Start", off <= 0, () => loadHexOffset(0));
+    if (end < d.size) {
+      mkBtn("Load 8 MiB here", false, () => loadHexOffset(off, 8 * 1024 * 1024));
+    }
+    body.appendChild(bar);
+  }
+}
+
+async function loadHexOffset(offset, bytes) {
+  if (!selPath) return;
+  const body = $("#detail-body");
+  if (!body) return;
+  const pe = encodeURIComponent(selPath);
+  let url = `/api/file?path=${pe}&mode=hex&offset=${offset || 0}`;
+  if (bytes) url += `&bytes=${bytes}`;
+  beginWork("Loading hex…", {
+    title: "Hex",
+    message: selPath,
+    hint: `offset ${offset || 0}`,
+    overlayDelay: 120,
+  });
+  try {
+    const d = await api(url);
+    if (d.error) {
+      body.innerHTML = errHtml(d);
+      notifyError(d);
+      return;
+    }
+    curView = "hex";
+    document.querySelectorAll(".dtab[data-view]").forEach((b) =>
+      b.classList.toggle("active", b.dataset.view === "hex"));
+    renderAccessor(d, body);
+  } catch (e) {
+    body.innerHTML = errHtml({ error: String(e.message || e), title: "Hex load failed" });
+  } finally {
+    endWork();
+  }
 }
 
 async function loadFindings() {

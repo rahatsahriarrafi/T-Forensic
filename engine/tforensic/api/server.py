@@ -20,7 +20,12 @@ from tforensic.accessors import (
 from tforensic.analysis import classify_artifacts, hashes, is_executable
 from tforensic.case import Case, load_case, tree_dict
 from tforensic.evidence import DiskCase, PcapCase, accepted_formats, open_evidence
-from tforensic.preview import detect_and_decode, hexdump, preview_to_dict
+from tforensic.preview import (
+    HEX_PREVIEW_MAX,
+    detect_and_decode,
+    hex_window,
+    preview_to_dict,
+)
 from tforensic import xmount_wrap as xm
 from dataclasses import asdict
 
@@ -32,6 +37,52 @@ def _uploads_dir() -> Path:
     d = Path(tempfile.gettempdir()) / "tforensic-uploads"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _parse_byte_window(q) -> tuple[int, Optional[int]]:
+    """offset / bytes query params for hex (and large-file) paging."""
+    try:
+        offset = max(0, int((q.get("offset") or ["0"])[0]))
+    except (TypeError, ValueError):
+        offset = 0
+    raw = (q.get("bytes") or [None])[0]
+    if raw in (None, ""):
+        return offset, None
+    try:
+        length = max(1, min(int(raw), HEX_PREVIEW_MAX))
+    except (TypeError, ValueError):
+        length = None
+    return offset, length
+
+
+def _hex_payload(data: bytes, *, name: str = "", note: str = "", offset: int = 0, length: Optional[int] = None) -> dict:
+    text, off, win, more = hex_window(data, offset=offset, length=length)
+    ext = ""
+    if name and "." in name:
+        ext = name.rsplit(".", 1)[-1].lower()
+    end = off + win
+    n = note or f"hex bytes {off}-{end} of {len(data)}"
+    return {
+        "accessor": "hex",
+        "label": "Hex",
+        "extension": ext,
+        "mime": "application/octet-stream",
+        "mode": "hex",
+        "encoding": None,
+        "text": text,
+        "html": "",
+        "data_url": "",
+        "rows": None,
+        "columns": None,
+        "items": None,
+        "truncated": more or off > 0,
+        "size": len(data),
+        "kind": "hex",
+        "executable": is_executable(data),
+        "note": n,
+        "offset": off,
+        "window": win,
+    }
 
 
 def _safe_upload_name(name: str) -> str:
@@ -674,7 +725,7 @@ class Handler(BaseHTTPRequestHandler):
         want_sqlite = looks_like_sqlite(b"", parsed["name"]) or (
             len(data) >= 16 and data[:15] == b"SQLite format 3"
         )
-        # Re-read if we truncated a SQLite DB at 2MB — icat already wrote full file to dest
+        # Re-read if we truncated a SQLite DB — icat already wrote full file to dest
         if want_sqlite:
             try:
                 data = Path(out).read_bytes()[:MAX_SQLITE_BYTES]
@@ -682,24 +733,41 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             preview = data
         else:
-            preview = data[: min(len(data), preview_byte_cap(parsed["name"]))]
+            # Prefer full extracted file; cap only for huge media/binaries
+            cap = preview_byte_cap(parsed["name"])
+            preview = data if len(data) <= cap else data[:cap]
+        off, nbytes = _parse_byte_window(q)
         if mode == "hex":
-            return self._send(200, {
-                "accessor": "hex", "label": "Hex", "mode": "hex",
-                "text": hexdump(preview[:65536]),
-                "truncated": len(data) > 65536,
-                "size": len(data),
-                "note": f"icat inode {parsed['inode']} → {out}",
-                "extension": "", "mime": "application/octet-stream",
-                "encoding": None, "html": "", "data_url": "",
-                "rows": None, "columns": None, "items": None,
-                "kind": "hex", "executable": is_executable(data),
-            })
-        acc = open_with_accessor(parsed["name"], preview)
+            # Page hex across the full icat bytes (up to 256 MiB resident)
+            hex_cap = 256 * 1024 * 1024
+            src = data if len(data) <= hex_cap else data[:hex_cap]
+            payload = _hex_payload(
+                src,
+                name=parsed["name"],
+                note=f"icat inode {parsed['inode']} → {out}",
+                offset=off,
+                length=nbytes,
+            )
+            payload["size"] = len(data)
+            if len(src) < len(data):
+                payload["truncated"] = True
+                payload["note"] += (
+                    f" · inline window {len(src)} of {len(data)} bytes "
+                    "(Export for remainder)"
+                )
+            return self._send(200, payload)
+        acc = open_with_accessor(
+            parsed["name"], preview, offset=off, length=nbytes,
+        )
         d = accessor_to_dict(acc)
         d["size"] = len(data)
         d["note"] = (d.get("note") or "") + f" · icat inode {parsed['inode']}"
-        d["truncated"] = len(data) > len(preview)
+        if len(data) > len(preview):
+            d["truncated"] = True
+            d["note"] += (
+                f" · loaded {len(preview)} of {len(data)} bytes "
+                "(Export for full file)"
+            )
         return self._send(200, d)
 
     def _api_disk_hash(self, q):
@@ -949,40 +1017,24 @@ class Handler(BaseHTTPRequestHandler):
             })
         mode = q.get("mode", ["auto"])[0]
         force = q.get("accessor", [None])[0]
+        off, nbytes = _parse_byte_window(q)
         try:
             data = CASE.read(node.path)
         except Exception as e:
             from tforensic.errors import explain_exception
             return self._send(400, explain_exception(e).as_dict())
         if mode == "hex":
-            preview = data[:65536]
             return self._send(
                 200,
-                {
-                    "accessor": "hex",
-                    "label": "Hex",
-                    "extension": node.name.rsplit(".", 1)[-1].lower() if "." in node.name else "",
-                    "mime": "application/octet-stream",
-                    "mode": "hex",
-                    "encoding": None,
-                    "text": hexdump(preview),
-                    "html": "",
-                    "data_url": "",
-                    "rows": None,
-                    "columns": None,
-                    "items": None,
-                    "truncated": len(data) > len(preview),
-                    "size": len(data),
-                    "kind": "hex",
-                    "executable": is_executable(data),
-                    "note": "",
-                },
+                _hex_payload(data, name=node.name or "", offset=off, length=nbytes),
             )
         if mode == "force-hex":
-            result = detect_and_decode(data, force_hex=True)
+            result = detect_and_decode(data, force_hex=True, offset=off, length=nbytes)
             out = preview_to_dict(result)
-            out.update({"accessor": "hex", "label": "Hex", "extension": "", "mime": "",
-                        "html": "", "data_url": "", "rows": None, "columns": None, "items": None})
+            out.update({
+                "accessor": "hex", "label": "Hex", "extension": "", "mime": "",
+                "html": "", "data_url": "", "rows": None, "columns": None, "items": None,
+            })
             return self._send(200, out)
         # Extension-aware accessor (default Preview tab)
         try:
@@ -996,7 +1048,14 @@ class Handler(BaseHTTPRequestHandler):
                         system_data = CASE.read(sys_path)
                     except Exception:
                         system_data = None
-            acc = open_with_accessor(node.path, data, force=force, system_data=system_data)
+            acc = open_with_accessor(
+                node.path,
+                data,
+                force=force,
+                system_data=system_data,
+                offset=off,
+                length=nbytes,
+            )
             return self._send(200, accessor_to_dict(acc))
         except Exception as e:
             from tforensic.errors import explain_exception

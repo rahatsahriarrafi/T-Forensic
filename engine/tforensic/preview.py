@@ -4,8 +4,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+# Forensic defaults: show the whole artifact when it fits; page hex when it does not.
+# (Old PREVIEW_CAP=64KiB hid most log/config/script content.)
+TEXT_PREVIEW_MAX = 32 * 1024 * 1024
+HEX_PREVIEW_DEFAULT = 1024 * 1024
+HEX_PREVIEW_MAX = 8 * 1024 * 1024
 
-PREVIEW_CAP = 65536
+# Back-compat alias used by older call sites / tests
+PREVIEW_CAP = TEXT_PREVIEW_MAX
 
 
 @dataclass
@@ -18,6 +24,8 @@ class PreviewResult:
     kind: str  # utf8 | utf16le | utf16be | latin1 | pe | binary | empty
     executable: bool = False
     note: str = ""
+    offset: int = 0
+    window: int = 0
 
 
 def is_executable(data: bytes) -> bool:
@@ -77,24 +85,51 @@ def _control_ratio(text: str) -> float:
     return bad / len(text)
 
 
-def hexdump(data: bytes, limit: int = PREVIEW_CAP) -> str:
-    preview = data[:limit]
+def hexdump(data: bytes, limit: Optional[int] = None, *, base: int = 0) -> str:
+    """Format bytes as classic hex+ASCII. `limit` caps how much of `data` is shown."""
+    if limit is None:
+        limit = HEX_PREVIEW_DEFAULT
+    preview = data[: max(0, limit)]
     lines = []
     for i in range(0, len(preview), 16):
         chunk = preview[i : i + 16]
         hexs = " ".join(f"{b:02x}" for b in chunk)
         asc = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
-        lines.append(f"{i:08x}  {hexs:<47}  {asc}")
+        lines.append(f"{base + i:08x}  {hexs:<47}  {asc}")
     return "\n".join(lines)
 
 
-def detect_and_decode(data: bytes, force_hex: bool = False) -> PreviewResult:
+def hex_window(
+    data: bytes,
+    *,
+    offset: int = 0,
+    length: Optional[int] = None,
+) -> tuple[str, int, int, bool]:
+    """
+    Hex-dump a byte window of `data`.
+    Returns (text, offset, window_len, truncated).
+    """
     size = len(data)
-    truncated = size > PREVIEW_CAP
-    preview = data[:PREVIEW_CAP]
+    off = max(0, min(offset, size))
+    want = HEX_PREVIEW_DEFAULT if length is None else int(length)
+    want = max(1, min(want, HEX_PREVIEW_MAX, size - off if size > off else 0))
+    chunk = data[off : off + want]
+    text = hexdump(chunk, limit=len(chunk), base=off)
+    truncated = off + len(chunk) < size or off > 0
+    return text, off, len(chunk), (off + len(chunk) < size)
+
+
+def detect_and_decode(
+    data: bytes,
+    force_hex: bool = False,
+    *,
+    offset: int = 0,
+    length: Optional[int] = None,
+) -> PreviewResult:
+    size = len(data)
     exe = is_executable(data)
 
-    if not preview:
+    if not data:
         return PreviewResult(
             mode="text",
             encoding=None,
@@ -106,16 +141,23 @@ def detect_and_decode(data: bytes, force_hex: bool = False) -> PreviewResult:
         )
 
     if force_hex or exe:
+        text, off, win, more = hex_window(data, offset=offset, length=length)
         return PreviewResult(
             mode="hex",
             encoding=None,
-            text=hexdump(preview),
+            text=text,
             size=size,
-            truncated=truncated,
+            truncated=more or off > 0,
             kind="pe" if exe else "binary",
             executable=exe,
             note="PE/MZ executable" if exe else "hex view",
+            offset=off,
+            window=win,
         )
+
+    # Text: decode as much of the file as the forensic cap allows (usually all of it).
+    preview = data[:TEXT_PREVIEW_MAX]
+    truncated = size > TEXT_PREVIEW_MAX
 
     # Prefer UTF-16 when NUL pattern matches (fixes AD1 Viewer garbage previews).
     if _looks_utf16_le(preview):
@@ -129,6 +171,7 @@ def detect_and_decode(data: bytes, force_hex: bool = False) -> PreviewResult:
                     size=size,
                     truncated=truncated,
                     kind="utf16le",
+                    window=len(preview),
                 )
         except UnicodeDecodeError:
             pass
@@ -144,6 +187,7 @@ def detect_and_decode(data: bytes, force_hex: bool = False) -> PreviewResult:
                     size=size,
                     truncated=truncated,
                     kind="utf16be",
+                    window=len(preview),
                 )
         except UnicodeDecodeError:
             pass
@@ -159,6 +203,7 @@ def detect_and_decode(data: bytes, force_hex: bool = False) -> PreviewResult:
                 size=size,
                 truncated=truncated,
                 kind="utf8",
+                window=len(preview),
             )
     except UnicodeDecodeError:
         pass
@@ -173,16 +218,20 @@ def detect_and_decode(data: bytes, force_hex: bool = False) -> PreviewResult:
             size=size,
             truncated=truncated,
             kind="latin1",
+            window=len(preview),
         )
 
+    hx, off, win, more = hex_window(data, offset=offset, length=length)
     return PreviewResult(
         mode="hex",
         encoding=None,
-        text=hexdump(preview),
+        text=hx,
         size=size,
-        truncated=truncated,
+        truncated=more or off > 0,
         kind="binary",
         note="binary or undecodable as text — showing hex",
+        offset=off,
+        window=win,
     )
 
 
@@ -196,4 +245,6 @@ def preview_to_dict(result: PreviewResult) -> dict:
         "kind": result.kind,
         "executable": result.executable,
         "note": result.note,
+        "offset": result.offset,
+        "window": result.window,
     }

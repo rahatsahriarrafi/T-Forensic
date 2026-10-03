@@ -15,6 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "engine"))
 
 from tforensic.accessors import accessor_for, open_with_accessor  # noqa: E402
+from tforensic.preview import hex_window  # noqa: E402
 
 
 class TestAccessors(unittest.TestCase):
@@ -113,6 +114,25 @@ class TestAccessors(unittest.TestCase):
         self.assertEqual(r.accessor, "json")
         self.assertEqual(r.mode, "json")
         self.assertIn("\n", r.text)
+
+    def test_text_not_capped_at_64k(self):
+        # Old PREVIEW_CAP=65536 hid the rest of logs/scripts — forensic preview must keep it.
+        body = ("LINE-%05d-ABCDEFGHIJKLMNOPQRSTUVWXYZ\n" % i for i in range(4000))
+        data = "".join(body).encode("utf-8")
+        self.assertGreater(len(data), 65536)
+        r = open_with_accessor("big.log", data)
+        self.assertEqual(r.mode, "text")
+        self.assertFalse(r.truncated)
+        self.assertIn("LINE-03999-", r.text)
+        self.assertEqual(r.size, len(data))
+
+    def test_hex_window_pages(self):
+        data = bytes(range(256)) * 8  # 2048 bytes
+        text, off, win, more = hex_window(data, offset=1024, length=512)
+        self.assertEqual(off, 1024)
+        self.assertEqual(win, 512)
+        self.assertTrue(more)
+        self.assertTrue(text.startswith("00000400"))
 
     def test_image_data_url(self):
         # minimal 1x1 PNG — routed via EXIF accessor (still embeds preview)

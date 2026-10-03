@@ -12,7 +12,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from tforensic.preview import PREVIEW_CAP, detect_and_decode, hexdump, preview_to_dict
+from tforensic.preview import (
+    HEX_PREVIEW_DEFAULT,
+    TEXT_PREVIEW_MAX,
+    detect_and_decode,
+    hex_window,
+    preview_to_dict,
+)
 
 
 # accessor id → human label
@@ -128,6 +134,8 @@ class AccessorResult:
     kind: str = ""
     executable: bool = False
     note: str = ""
+    offset: int = 0
+    window: int = 0
 
 
 def extension_of(path: str) -> str:
@@ -199,6 +207,8 @@ _MEDIA_SAMPLE_MAX = 12 * 1024 * 1024
 _IMAGE_SAMPLE_MAX = 16 * 1024 * 1024
 # Max raw bytes embedded as a data URL; larger/incomplete images get an ffmpeg thumb.
 _IMAGE_EMBED_MAX = 6 * 1024 * 1024
+# Disk/icat inline window for generic files (text/logs/binaries). Hex can page beyond.
+_DEFAULT_SAMPLE_MAX = 64 * 1024 * 1024
 
 
 def preview_byte_cap(path: str) -> int:
@@ -208,7 +218,7 @@ def preview_byte_cap(path: str) -> int:
         return _MEDIA_SAMPLE_MAX
     if acc in {"exif", "image"}:
         return _IMAGE_SAMPLE_MAX
-    return 2_000_000
+    return _DEFAULT_SAMPLE_MAX
 
 
 def _image_bytes_complete(data: bytes, ext: str) -> bool:
@@ -336,8 +346,22 @@ def _ffmpeg_still_data_url(path: str) -> str:
                 pass
 
 
-def _text_result(path: str, data: bytes, accessor: str) -> AccessorResult:
-    prev = detect_and_decode(data)
+def _text_result(
+    path: str,
+    data: bytes,
+    accessor: str,
+    *,
+    offset: int = 0,
+    length: Optional[int] = None,
+    force_hex: bool = False,
+) -> AccessorResult:
+    prev = detect_and_decode(data, force_hex=force_hex, offset=offset, length=length)
+    note = prev.note or f"Opened with {ACCESSOR_LABELS.get(accessor, accessor)} accessor"
+    if prev.truncated and prev.mode == "text":
+        note = f"{note} · showing first {prev.window or len(prev.text)} of {prev.size} bytes"
+    elif prev.mode == "hex" and prev.size > prev.window:
+        end = prev.offset + prev.window
+        note = f"{note} · hex bytes {prev.offset}-{end} of {prev.size}"
     return AccessorResult(
         accessor=accessor,
         label=ACCESSOR_LABELS.get(accessor, accessor),
@@ -350,7 +374,9 @@ def _text_result(path: str, data: bytes, accessor: str) -> AccessorResult:
         truncated=prev.truncated,
         kind=prev.kind,
         executable=prev.executable,
-        note=prev.note or f"Opened with {ACCESSOR_LABELS.get(accessor, accessor)} accessor",
+        note=note,
+        offset=prev.offset,
+        window=prev.window,
     )
 
 
@@ -418,8 +444,9 @@ def _image_result(path: str, data: bytes) -> AccessorResult:
 
 
 def _json_result(path: str, data: bytes) -> AccessorResult:
-    prev = detect_and_decode(data)
-    text = prev.text if prev.mode == "text" else data[:PREVIEW_CAP].decode("utf-8", "replace")
+    # Parse the full payload (up to text forensic cap) — never the old 64KiB slice.
+    raw = data[:TEXT_PREVIEW_MAX]
+    text = raw.decode("utf-8", "replace")
     try:
         obj = json.loads(text)
         pretty = json.dumps(obj, indent=2, ensure_ascii=False)
@@ -432,11 +459,13 @@ def _json_result(path: str, data: bytes) -> AccessorResult:
             encoding="utf-8",
             text=pretty,
             size=len(data),
-            truncated=len(data) > PREVIEW_CAP,
+            truncated=len(data) > TEXT_PREVIEW_MAX,
             kind="json",
             note="pretty-printed JSON",
+            window=len(raw),
         )
     except Exception as e:
+        prev = detect_and_decode(data)
         return AccessorResult(
             accessor="json",
             label="JSON",
@@ -444,11 +473,12 @@ def _json_result(path: str, data: bytes) -> AccessorResult:
             mime="application/json",
             mode="text",
             encoding=prev.encoding,
-            text=text,
+            text=text if prev.mode != "text" else prev.text,
             size=len(data),
-            truncated=prev.truncated,
+            truncated=len(data) > TEXT_PREVIEW_MAX or prev.truncated,
             kind="json-invalid",
             note=f"JSON parse failed: {e}",
+            window=len(raw),
         )
 
 
@@ -461,14 +491,15 @@ def _archive_result(path: str, data: bytes) -> AccessorResult:
             tmp_path = tmp.name
         try:
             with zipfile.ZipFile(tmp_path, "r") as zf:
-                for info in zf.infolist()[:500]:
+                infos = zf.infolist()
+                for info in infos:
                     items.append({
                         "name": info.filename,
                         "size": info.file_size,
                         "compressed": info.compress_size,
                         "is_dir": info.is_dir(),
                     })
-                note = f"{len(zf.infolist())} entries (ZIP-compatible)"
+                note = f"{len(infos)} entries (ZIP-compatible)"
         finally:
             os.unlink(tmp_path)
     except Exception as e:
@@ -485,6 +516,8 @@ def _archive_result(path: str, data: bytes) -> AccessorResult:
             truncated=prev.truncated,
             kind="archive",
             note=note,
+            offset=prev.offset,
+            window=prev.window,
         )
     return AccessorResult(
         accessor="archive",
@@ -494,7 +527,7 @@ def _archive_result(path: str, data: bytes) -> AccessorResult:
         mode="list",
         items=items,
         size=len(data),
-        truncated=len(items) >= 500,
+        truncated=False,
         kind="zip",
         note=note,
     )
@@ -781,19 +814,22 @@ def _recycle_result(path: str, data: bytes) -> AccessorResult:
 
 
 def _info_result(path: str, data: bytes, accessor: str, note: str) -> AccessorResult:
-    prev = detect_and_decode(data, force_hex=True)
+    # Header hex sample only — full bytes stay available via Hex tab / Download.
+    text, off, win, more = hex_window(data, offset=0, length=min(4096, HEX_PREVIEW_DEFAULT))
     return AccessorResult(
         accessor=accessor,
         label=ACCESSOR_LABELS.get(accessor, accessor),
         extension=extension_of(path),
         mime=mime_for(path),
         mode="info",
-        text=prev.text[:4096],
+        text=text,
         size=len(data),
-        truncated=True,
+        truncated=more,
         kind=accessor,
         note=note,
         executable=data[:2] == b"MZ",
+        offset=off,
+        window=win,
     )
 
 
@@ -803,6 +839,8 @@ def open_with_accessor(
     force: Optional[str] = None,
     *,
     system_data: Optional[bytes] = None,
+    offset: int = 0,
+    length: Optional[int] = None,
 ) -> AccessorResult:
     """Open file bytes with the accessor for its extension (or forced accessor)."""
     acc = force or accessor_for(path, data)
@@ -826,11 +864,12 @@ def open_with_accessor(
     if acc == "exif":
         return _exif_result(path, data)
     if acc == "pe":
-        r = _text_result(path, data, "pe")
+        r = _text_result(
+            path, data, "pe", offset=offset, length=length, force_hex=True,
+        )
         r.mode = "hex"
-        r.text = hexdump(data)
         r.executable = True
-        r.note = "PE/MZ — hex accessor"
+        r.note = r.note or "PE/MZ — hex accessor"
         return r
     if acc == "pdf":
         return _info_result(
@@ -883,19 +922,21 @@ def open_with_accessor(
             "Network capture — open this path in the Network tab (Wireshark/tshark packet list, filters, conversations)",
         )
     if acc == "hex":
-        r = _text_result(path, data, "hex")
+        r = _text_result(
+            path, data, "hex", offset=offset, length=length, force_hex=True,
+        )
         r.mode = "hex"
-        r.text = hexdump(data)
         if extension_of(path) == "mod" and _looks_like_tracker_mod(data):
             r.note = (
                 "Tracker music module (ProTracker-style), not camcorder MPEG. "
-                "Shown as hex - export if you need a module player."
+                "Shown as hex - export if you need a module player. "
+                + (r.note or "")
             )
         return r
     if acc in ("text", "markup"):
-        return _text_result(path, data, acc)
+        return _text_result(path, data, acc, offset=offset, length=length)
     # auto
-    return _text_result(path, data, "auto")
+    return _text_result(path, data, "auto", offset=offset, length=length)
 
 
 def accessor_to_dict(r: AccessorResult) -> dict:
@@ -912,6 +953,8 @@ def accessor_to_dict(r: AccessorResult) -> dict:
         "rows": r.rows,
         "columns": r.columns,
         "items": r.items,
+        "offset": r.offset,
+        "window": r.window,
         "size": r.size,
         "truncated": r.truncated,
         "kind": r.kind,
