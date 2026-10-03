@@ -11,7 +11,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
 
-from tforensic.accessors import accessor_to_dict, list_accessors, open_with_accessor
+from tforensic.accessors import (
+    accessor_to_dict,
+    list_accessors,
+    open_with_accessor,
+    preview_byte_cap,
+)
 from tforensic.analysis import classify_artifacts, hashes, is_executable
 from tforensic.case import Case, load_case, tree_dict
 from tforensic.evidence import DiskCase, PcapCase, accepted_formats, open_evidence
@@ -677,7 +682,7 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             preview = data
         else:
-            preview = data[: min(len(data), 2_000_000)]
+            preview = data[: min(len(data), preview_byte_cap(parsed["name"]))]
         if mode == "hex":
             return self._send(200, {
                 "accessor": "hex", "label": "Hex", "mode": "hex",

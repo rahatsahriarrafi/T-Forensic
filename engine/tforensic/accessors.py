@@ -5,6 +5,7 @@ import base64
 import json
 import mimetypes
 import os
+import shutil
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -192,29 +193,76 @@ def mime_for(path: str) -> str:
     return "application/octet-stream"
 
 
-def _ffprobe_summary(data: bytes, ext: str) -> str:
+# Cap sample written to /tmp for probe + still (huge MOD/VOB stay on evidence).
+_MEDIA_SAMPLE_MAX = 12 * 1024 * 1024
+# How many bytes the API feeds the accessor for photos (phone JPEGs are often >2 MiB).
+_IMAGE_SAMPLE_MAX = 16 * 1024 * 1024
+# Max raw bytes embedded as a data URL; larger/incomplete images get an ffmpeg thumb.
+_IMAGE_EMBED_MAX = 6 * 1024 * 1024
+
+
+def preview_byte_cap(path: str) -> int:
+    """How many bytes the API should pass into open_with_accessor for this name."""
+    acc = EXT_MAP.get(extension_of(path))
+    if acc == "media":
+        return _MEDIA_SAMPLE_MAX
+    if acc in {"exif", "image"}:
+        return _IMAGE_SAMPLE_MAX
+    return 2_000_000
+
+
+def _image_bytes_complete(data: bytes, ext: str) -> bool:
+    """True when bytes look like a whole image (truncation breaks browser <img>)."""
+    if len(data) < 24:
+        return False
+    if data[:2] == b"\xff\xd8" or ext in {"jpg", "jpeg"}:
+        if data[:2] != b"\xff\xd8":
+            return False
+        # EOI must be at the end (allow trailing NULs from padding)
+        return data.rstrip(b"\x00")[-2:] == b"\xff\xd9"
+    if data[:8] == b"\x89PNG\r\n\x1a\n" or ext == "png":
+        return data[:8] == b"\x89PNG\r\n\x1a\n" and data[-8:] == b"IEND\xaeB`\x82"
+    if data[:6] in (b"GIF87a", b"GIF89a") or ext == "gif":
+        return data[:6] in (b"GIF87a", b"GIF89a") and data[-1:] == b"\x3b"
+    if (data[:4] == b"RIFF" and data[8:12] == b"WEBP") or ext == "webp":
+        return len(data) >= 16 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+    return True
+
+
+def _write_media_sample(data: bytes, ext: str) -> Optional[str]:
+    if not data:
+        return None
+    suffix = f".{ext}" if ext else ".bin"
+    fd, tmp = tempfile.mkstemp(prefix="tff-media-", suffix=suffix)
+    try:
+        os.close(fd)
+        sample = data if len(data) <= _MEDIA_SAMPLE_MAX else data[:_MEDIA_SAMPLE_MAX]
+        with open(tmp, "wb") as f:
+            f.write(sample)
+        return tmp
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return None
+
+
+def _ffprobe_summary_file(path: str) -> str:
     """Best-effort stream info for media previews (does not modify evidence)."""
-    import shutil
     import subprocess
 
     ffprobe = shutil.which("ffprobe")
-    if not ffprobe or not data:
+    if not ffprobe:
         return ""
-    suffix = f".{ext}" if ext else ".bin"
-    tmp: Optional[str] = None
     try:
-        fd, tmp = tempfile.mkstemp(prefix="tff-media-", suffix=suffix)
-        os.close(fd)
-        # Cap probe sample so huge MOD/VOB files do not fill /tmp
-        sample = data if len(data) <= 8 * 1024 * 1024 else data[: 8 * 1024 * 1024]
-        with open(tmp, "wb") as f:
-            f.write(sample)
         raw = subprocess.run(
             [
                 ffprobe, "-v", "error",
-                "-show_entries", "format=format_name,duration,size,bit_rate:stream=codec_type,codec_name,width,height",
+                "-show_entries",
+                "format=format_name,duration,size,bit_rate:stream=codec_type,codec_name,width,height",
                 "-of", "json",
-                tmp,
+                path,
             ],
             capture_output=True,
             text=True,
@@ -243,10 +291,47 @@ def _ffprobe_summary(data: bytes, ext: str) -> str:
         return "ffprobe: " + ", ".join(parts) if parts else ""
     except Exception:
         return ""
+
+
+def _ffmpeg_still_data_url(path: str) -> str:
+    """First video frame as a JPEG data URL (empty if ffmpeg missing / audio-only)."""
+    import subprocess
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return ""
+    out: Optional[str] = None
+    try:
+        fd, out = tempfile.mkstemp(prefix="tff-still-", suffix=".jpg")
+        os.close(fd)
+        raw = subprocess.run(
+            [
+                ffmpeg, "-hide_banner", "-loglevel", "error",
+                "-probesize", "8M", "-analyzeduration", "8M",
+                "-i", path,
+                "-an", "-frames:v", "1",
+                "-q:v", "4",
+                "-y", out,
+            ],
+            capture_output=True,
+            timeout=20,
+            check=False,
+        )
+        if raw.returncode != 0:
+            return ""
+        jpg = Path(out).read_bytes()
+        if len(jpg) < 32 or jpg[:2] != b"\xff\xd8":
+            return ""
+        # ponytail: one JPEG frame; if somehow huge, skip embedding
+        if len(jpg) > 2 * 1024 * 1024:
+            return ""
+        return "data:image/jpeg;base64," + base64.b64encode(jpg).decode("ascii")
+    except Exception:
+        return ""
     finally:
-        if tmp:
+        if out:
             try:
-                os.unlink(tmp)
+                os.unlink(out)
             except OSError:
                 pass
 
@@ -269,10 +354,24 @@ def _text_result(path: str, data: bytes, accessor: str) -> AccessorResult:
     )
 
 
+def _image_thumb_data_url(data: bytes, ext: str) -> str:
+    """Decode via ffmpeg into a small JPEG data URL (works on truncated phone JPEGs)."""
+    sample = _write_media_sample(data, ext or "bin")
+    if not sample:
+        return ""
+    try:
+        return _ffmpeg_still_data_url(sample)
+    finally:
+        try:
+            os.unlink(sample)
+        except OSError:
+            pass
+
+
 def _image_result(path: str, data: bytes) -> AccessorResult:
+    ext = extension_of(path)
     mime = mime_for(path)
     if mime == "application/octet-stream":
-        ext = extension_of(path)
         mime = {
             "png": "image/png",
             "jpg": "image/jpeg",
@@ -282,21 +381,39 @@ def _image_result(path: str, data: bytes) -> AccessorResult:
             "webp": "image/webp",
             "ico": "image/x-icon",
             "svg": "image/svg+xml",
-        }.get(ext, "image/png")
-    # Cap embedded preview size (~4 MiB)
-    preview = data[: 4 * 1024 * 1024]
-    b64 = base64.b64encode(preview).decode("ascii")
+            "tif": "image/tiff",
+            "tiff": "image/tiff",
+            "heic": "image/heic",
+        }.get(ext, "image/jpeg" if ext in {"jpg", "jpeg"} else "image/png")
+    note = f"{mime} · {len(data)} bytes"
+    data_url = ""
+    truncated = False
+    complete = _image_bytes_complete(data, ext)
+    if complete and len(data) <= _IMAGE_EMBED_MAX:
+        data_url = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+    else:
+        # Large or truncated JPEG/PNG: never embed a cut-off file (browser shows nothing).
+        data_url = _image_thumb_data_url(data, ext)
+        truncated = True
+        if data_url:
+            note += " · preview thumbnail"
+        elif complete and len(data) <= _IMAGE_SAMPLE_MAX:
+            # ffmpeg missing — last resort embed (may be heavy)
+            data_url = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+            truncated = False
+        elif not shutil.which("ffmpeg"):
+            note += " · install ffmpeg for image preview: sudo apt install ffmpeg"
     return AccessorResult(
         accessor="image",
         label="Image",
-        extension=extension_of(path),
+        extension=ext,
         mime=mime,
         mode="image",
-        data_url=f"data:{mime};base64,{b64}",
+        data_url=data_url,
         size=len(data),
-        truncated=len(data) > len(preview),
+        truncated=truncated or (not complete),
         kind="image",
-        note=f"{mime} · {len(data)} bytes",
+        note=note,
     )
 
 
@@ -726,17 +843,35 @@ def open_with_accessor(
         if ext in {"mod", "tod"} or _looks_like_mpeg_ps(data):
             note = (
                 f"Camcorder / MPEG Program Stream ({mime or 'video/mpeg'}). "
-                "Export and play with VLC/ffplay, or: ffprobe <exported.mod>"
+                "Still frame below when ffmpeg is available; export for full playback."
             )
             if _looks_like_mpeg_ps(data):
                 note += " · MPEG pack header detected"
         else:
-            note = f"Media file ({mime}) - export to play with a media player"
-        # Optional ffprobe summary when the binary is on PATH
-        probe = _ffprobe_summary(data, ext or "bin")
+            note = f"Media file ({mime}) - still frame below when ffmpeg is available"
+        still = ""
+        probe = ""
+        sample = _write_media_sample(data, ext or "bin")
+        try:
+            if sample:
+                probe = _ffprobe_summary_file(sample)
+                still = _ffmpeg_still_data_url(sample)
+        finally:
+            if sample:
+                try:
+                    os.unlink(sample)
+                except OSError:
+                    pass
         if probe:
             note = f"{note}\n{probe}"
-        return _info_result(path, data, "media", note)
+        if still:
+            note = f"{note}\nStill frame preview (ffmpeg)"
+        elif not shutil.which("ffmpeg"):
+            note = f"{note}\nInstall ffmpeg for inline still previews: sudo apt install ffmpeg"
+        r = _info_result(path, data, "media", note)
+        if still:
+            r.data_url = still
+        return r
     if acc == "office":
         return _info_result(
             path, data, "office",

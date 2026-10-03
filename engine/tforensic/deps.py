@@ -256,6 +256,16 @@ def check_dependencies() -> dict[str, Any]:
             apt="libimage-exiftool-perl",
         ),
         Dep(
+            id="ffmpeg",
+            name="ffmpeg",
+            kind="feature",
+            feature="Media still-frame preview (.mod/.mp4/...)",
+            ok=_bin("ffmpeg"),
+            check="which ffmpeg",
+            suggestion="sudo apt install ffmpeg",
+            apt="ffmpeg",
+        ),
+        Dep(
             id="john",
             name="John the Ripper",
             kind="feature",

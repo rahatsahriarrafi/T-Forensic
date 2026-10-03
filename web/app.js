@@ -1420,7 +1420,7 @@ function renderAccessor(d, body) {
     body.appendChild(enc);
   }
 
-  if (d.mode === "image" && d.data_url) {
+  if (d.data_url && (d.mode === "image" || d.kind === "image")) {
     const wrap = document.createElement("div");
     wrap.className = "img-wrap";
     const img = document.createElement("img");
@@ -1428,7 +1428,7 @@ function renderAccessor(d, body) {
     img.alt = selPath || "";
     wrap.appendChild(img);
     body.appendChild(wrap);
-    return;
+    if (d.mode === "image") return;
   }
 
   if (d.mode === "list" && d.items) {
@@ -1512,10 +1512,21 @@ function renderAccessor(d, body) {
   }
 
   if (d.mode === "info") {
+    if (d.data_url) {
+      const wrap = document.createElement("div");
+      wrap.className = "img-wrap";
+      const img = document.createElement("img");
+      img.src = d.data_url;
+      img.alt = selPath || "media still";
+      wrap.appendChild(img);
+      body.appendChild(wrap);
+    }
     const pre = document.createElement("pre");
     pre.className = "muted";
-    pre.textContent = (d.note || "No inline preview") +
-      "\n\nUse Download or Export, then open with the matching app on your system.";
+    const exportHint = d.data_url
+      ? "\n\nStill frame only - use Download or Export for full playback."
+      : "\n\nUse Download or Export, then open with the matching app on your system.";
+    pre.textContent = (d.note || "No inline preview") + exportHint;
     body.appendChild(pre);
     if (d.text) {
       const hex = document.createElement("pre");

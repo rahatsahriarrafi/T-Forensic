@@ -17,6 +17,7 @@ python3-libscca
 python3-libregf
 python3-libfwsi
 libimage-exiftool-perl
+ffmpeg
 
 # --- SAM / NTLM crack ---
 john

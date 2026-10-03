@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -33,6 +35,34 @@ class TestAccessors(unittest.TestCase):
         self.assertEqual(r.accessor, "media")
         self.assertIn("MPEG", r.note)
 
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg not installed")
+    def test_mod_still_frame(self):
+        # Tiny MPEG-PS clip shaped like camcorder .MOD
+        fd, path = tempfile.mkstemp(suffix=".mod")
+        os.close(fd)
+        try:
+            raw = subprocess.run(
+                [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    "-f", "lavfi", "-i", "testsrc=duration=0.5:size=160x120:rate=5",
+                    "-c:v", "mpeg2video", "-q:v", "5", "-f", "vob",
+                    "-y", path,
+                ],
+                capture_output=True,
+                timeout=20,
+                check=False,
+            )
+            self.assertEqual(raw.returncode, 0, raw.stderr.decode("utf-8", "replace"))
+            with open(path, "rb") as fh:
+                data = fh.read()
+            self.assertGreater(len(data), 100)
+            r = open_with_accessor("MOV001.MOD", data)
+            self.assertEqual(r.accessor, "media")
+            self.assertTrue(r.data_url.startswith("data:image/jpeg;base64,"), r.note)
+            self.assertIn("Still frame", r.note)
+        finally:
+            os.unlink(path)
+
     def test_mod_tracker_music(self):
         data = bytearray(1084)
         data[1080:1084] = b"M.K."
@@ -43,6 +73,39 @@ class TestAccessors(unittest.TestCase):
 
     def test_png_exif_accessor(self):
         self.assertEqual(accessor_for("pic.PNG"), "exif")
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg not installed")
+    def test_jpeg_truncated_still_visible(self):
+        """Phone JPEGs often exceed the old 2-4 MiB cap; cut-off bytes must not be embedded."""
+        fd, path = tempfile.mkstemp(suffix=".jpg")
+        os.close(fd)
+        try:
+            raw = subprocess.run(
+                [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error",
+                    "-f", "lavfi", "-i", "testsrc=size=3200x2400:duration=1",
+                    "-frames:v", "1", "-q:v", "1", "-y", path,
+                ],
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(raw.returncode, 0, raw.stderr.decode("utf-8", "replace"))
+            with open(path, "rb") as fh:
+                data = fh.read()
+            # Mid-file cut (no EOI) — old code embedded this and <img> stayed blank
+            trunc = data[: max(80_000, len(data) // 3)]
+            if trunc.endswith(b"\xff\xd9"):
+                trunc = trunc[:-2]
+            r = open_with_accessor("IMG_0001.JPG", trunc)
+            self.assertEqual(r.accessor, "exif")
+            self.assertTrue(r.data_url.startswith("data:image/jpeg;base64,"), r.note)
+            import base64
+            jpg = base64.b64decode(r.data_url.split(",", 1)[1])
+            self.assertEqual(jpg[:2], b"\xff\xd8")
+            self.assertEqual(jpg[-2:], b"\xff\xd9")
+        finally:
+            os.unlink(path)
 
     def test_json_pretty(self):
         raw = json.dumps({"a": 1, "b": [2, 3]}).encode()

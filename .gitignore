@@ -42,3 +42,6 @@ npm-debug.log*
 tff*.log
 engine/tff*.log
 
+
+# Local code graph (not product)
+graphify-out/

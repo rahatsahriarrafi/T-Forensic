@@ -419,9 +419,49 @@ function createWindow() {
   }
 
   mainWindow.loadFile(path.join(__dirname, "shell.html"));
+  attachStandardEditUi(mainWindow);
   mainWindow.on("closed", () => {
     killPty();
     mainWindow = null;
+  });
+}
+
+/** Edit menu roles + right-click Cut/Copy/Paste (Electron has none by default). */
+function attachStandardEditUi(win) {
+  win.webContents.on("context-menu", (_event, params) => {
+    const x = Number(params.x) || 0;
+    const y = Number(params.y) || 0;
+    // Terminal uses its own right-click copy/paste in preload.js
+    win.webContents
+      .executeJavaScript(
+        `(() => {
+          const el = document.elementFromPoint(${x}, ${y});
+          return !!(el && el.closest && el.closest("#terminal, .xterm"));
+        })()`
+      )
+      .then((inTerm) => {
+        if (inTerm || win.isDestroyed()) return;
+        const f = params.editFlags || {};
+        const items = params.isEditable
+          ? [
+              { role: "undo", enabled: !!f.canUndo },
+              { role: "redo", enabled: !!f.canRedo },
+              { type: "separator" },
+              { role: "cut", enabled: !!f.canCut },
+              { role: "copy", enabled: !!f.canCopy },
+              { role: "paste", enabled: !!f.canPaste },
+              { role: "delete", enabled: !!f.canDelete },
+              { type: "separator" },
+              { role: "selectAll", enabled: !!f.canSelectAll },
+            ]
+          : [
+              { role: "copy", enabled: !!(f.canCopy || params.selectionText) },
+              { type: "separator" },
+              { role: "selectAll", enabled: !!f.canSelectAll },
+            ];
+        Menu.buildFromTemplate(items).popup({ window: win });
+      })
+      .catch(() => {});
   });
 }
 
@@ -437,6 +477,20 @@ function buildMenu() {
         },
         { type: "separator" },
         { role: "quit" },
+      ],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "delete" },
+        { type: "separator" },
+        { role: "selectAll" },
       ],
     },
     {
