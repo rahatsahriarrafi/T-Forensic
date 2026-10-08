@@ -1,6 +1,6 @@
 {
   "name": "t-forensic",
-  "version": "0.3.17",
+  "version": "0.3.18",
   "description": "Team Forensic Framework (TFF) — AD1-first local forensic desktop by Team NullX",
   "main": "main.js",
   "author": "Team NullX",

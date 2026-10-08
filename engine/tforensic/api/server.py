@@ -901,6 +901,19 @@ class Handler(BaseHTTPRequestHandler):
 
         rows = format_attrs(attrs)
         extra = {}
+        if not node.is_dir or (node.chunk_desc_rel and node.size):
+            try:
+                digest = hashes(CASE.read(node.path))["sha256"]
+                rows.insert(0, {
+                    "key": "sha256",
+                    "label": "SHA-256 (computed)",
+                    "raw": digest,
+                    "display": digest,
+                    "kind": "hash",
+                })
+                extra["sha256"] = digest
+            except Exception:
+                pass
         name = (node.name or "").upper()
         if name.startswith("$I") and not node.is_dir:
             try:
