@@ -66,6 +66,8 @@ def _stage(name: str, seconds: float, detail: str = "") -> dict[str, Any]:
 
 
 def classify_for_estimate(path: str | Path) -> str:
+    if Path(path).is_dir():
+        return "folder"
     ext = Path(path).suffix.lower()
     if ext == ".ad1":
         return "ad1"
@@ -109,7 +111,9 @@ def estimate_open(path: str | Path, *, input_type: Optional[str] = None) -> dict
 
     stages: list[dict[str, Any]] = []
 
-    if kind == "ad1":
+    if kind == "folder":
+        stages.append(_stage("Index folder", 5, "Walk directory tree (read-only)"))
+    elif kind == "ad1":
         sec = _FIXED["ad1"] + size / _RATES["ad1_parse"]
         stages.append(_stage("Parse AD1", sec, "Build session tree"))
     elif kind == "pcap":
@@ -151,7 +155,7 @@ def estimate_open(path: str | Path, *, input_type: Optional[str] = None) -> dict
 
     return {
         "path": str(path),
-        "exists": path.is_file(),
+        "exists": path.exists(),
         "size": size,
         "size_human": format_size(size),
         "kind": kind,

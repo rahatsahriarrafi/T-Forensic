@@ -473,11 +473,11 @@ class Handler(BaseHTTPRequestHandler):
                 "suggestion": "Pass {\"path\": \"/path/to/evidence.ad1\"} or use Open evidence…",
             })
         path = str(Path(path).expanduser())
-        if not os.path.isfile(path):
+        if not os.path.exists(path):
             return self._send(400, {
-                "error": f"file not found: {path}",
+                "error": f"not found: {path}",
                 "title": "Evidence not found",
-                "suggestion": "Use Open evidence… to pick a file, or enter a path that exists on this machine.",
+                "suggestion": "Use Open evidence… to pick a file or folder, or enter a path that exists on this machine.",
             })
         self._close_active_case()
         CASE = open_evidence(
@@ -949,6 +949,21 @@ class Handler(BaseHTTPRequestHandler):
         data = CASE.read(node.path)[:cap]
         return data, node.name
 
+    def _sqlite_wal(self, path: str) -> Optional[bytes]:
+        """Sibling <db>-wal bytes for AD1/folder evidence, if present."""
+        if CASE is None or path.startswith("inode:") or _is_disk_case(CASE) or _is_pcap_case(CASE):
+            return None
+        node = CASE.get(path)
+        if not node:
+            return None
+        wal = CASE.path_index.get(f"{node.path}-wal")
+        if not wal or wal.is_dir:
+            return None
+        try:
+            return CASE.read(wal.path) or None
+        except Exception:
+            return None
+
     def _api_sqlite(self, action: str, q):
         from tforensic.sqlite_view import (
             list_tables,
@@ -973,7 +988,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             data, name = self._read_evidence_bytes(path)
             cache_dir = str(Path(CASE.meta.export_dir) / "sqlite-cache")
-            mat = materialize_sqlite(path, data, cache_dir=cache_dir)
+            mat = materialize_sqlite(
+                path, data, cache_dir=cache_dir, wal=self._sqlite_wal(path),
+            )
             db_path = mat["path"]
             if action == "tables":
                 tables = list_tables(db_path)
@@ -1048,11 +1065,13 @@ class Handler(BaseHTTPRequestHandler):
                         system_data = CASE.read(sys_path)
                     except Exception:
                         system_data = None
+            wal_data = self._sqlite_wal(node.path) if data[:15] == b"SQLite format 3" else None
             acc = open_with_accessor(
                 node.path,
                 data,
                 force=force,
                 system_data=system_data,
+                wal_data=wal_data,
                 offset=off,
                 length=nbytes,
             )
@@ -1345,7 +1364,10 @@ def serve(
             print_progress(0.10, "estimate ready")
         except Exception:
             pass
-        if ext == ".ova":
+        if os.path.isdir(image):
+            print("  step: indexing folder (read-only) …", flush=True)
+            print_progress(0.35, "index folder")
+        elif ext == ".ova":
             print("  step: extract OVA (this can take a while for large appliances) …", flush=True)
             print_progress(0.20, "extract OVA")
             print("  step: convert disk if needed (qemu-img) …", flush=True)

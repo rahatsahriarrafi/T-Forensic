@@ -475,6 +475,11 @@ function buildMenu() {
           accelerator: "CmdOrCtrl+O",
           click: () => ipcOpenImage(),
         },
+        {
+          label: "Open folder (phone / extraction)…",
+          accelerator: "CmdOrCtrl+Shift+O",
+          click: () => ipcOpenImage(null, { folder: true }),
+        },
         { type: "separator" },
         { role: "quit" },
       ],
@@ -508,8 +513,19 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-async function ipcOpenImage(filePath) {
+async function ipcOpenImage(filePath, { folder = false } = {}) {
   let imagePath = filePath;
+  if (!imagePath && folder) {
+    const res = await dialog.showOpenDialog(mainWindow, {
+      title: "Open evidence folder (phone extraction, logical copy)",
+      properties: ["openDirectory"],
+    });
+    if (res.canceled || !res.filePaths.length) {
+      if (mainWindow) mainWindow.webContents.send("open-canceled");
+      return { canceled: true };
+    }
+    imagePath = res.filePaths[0];
+  }
   if (!imagePath) {
     const res = await dialog.showOpenDialog(mainWindow, {
       title: "Open forensic image",
@@ -574,6 +590,10 @@ async function ipcOpenImage(filePath) {
 
 ipcMain.handle("pick-and-open", async () => {
   return await ipcOpenImage();
+});
+
+ipcMain.handle("pick-and-open-folder", async () => {
+  return await ipcOpenImage(null, { folder: true });
 });
 
 ipcMain.handle("get-state", async () => ({

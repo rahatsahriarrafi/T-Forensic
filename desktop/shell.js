@@ -177,11 +177,13 @@ function toast({ title, message, suggestion, kind }) {
   setTimeout(() => el.remove(), kind === "err" ? 14000 : 6000);
 }
 
-async function openCase() {
+async function openCase(folder = false) {
   const prevMeta = meta.textContent;
-  meta.textContent = "Choose a file…";
+  meta.textContent = folder ? "Choose a folder…" : "Choose a file…";
   try {
-    const result = await window.tforensic.pickAndOpen();
+    const result = folder
+      ? await window.tforensic.pickAndOpenFolder()
+      : await window.tforensic.pickAndOpen();
     if (!result || result.canceled) {
       hideBusy();
       meta.textContent = caseUrl ? prevMeta : "No case loaded";
@@ -252,8 +254,10 @@ function showCase({ url, session, image }) {
   });
 }
 
-document.getElementById("btn-open").onclick = openCase;
-document.getElementById("btn-open-2").onclick = openCase;
+document.getElementById("btn-open").onclick = () => openCase();
+document.getElementById("btn-open-2").onclick = () => openCase();
+document.getElementById("btn-open-folder").onclick = () => openCase(true);
+document.getElementById("btn-open-folder-2").onclick = () => openCase(true);
 btnBrowser.onclick = () => caseUrl && window.tforensic.openExternal(caseUrl);
 window.tforensic.onCaseOpened(showCase);
 

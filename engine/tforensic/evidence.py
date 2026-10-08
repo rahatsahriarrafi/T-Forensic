@@ -71,6 +71,12 @@ FORMAT_CATALOG = [
         ],
         "notes": "Network tab — all common packet captures via tshark (Wireshark). Also .bfr .rf5 .k12 .vwr …",
     },
+    {
+        "group": "Folder / phone extraction",
+        "engine": "folder (read-only)",
+        "extensions": [],
+        "notes": "Open a directory: Android/iOS file-system dumps, logical copies, unpacked archives",
+    },
 ]
 
 
@@ -125,8 +131,10 @@ def is_disk_image(path: str | Path) -> bool:
 
 
 def classify_evidence(path: str | Path) -> str:
-    """Return 'ad1' | 'ova' | 'disk' | 'pcap' | 'unknown'."""
+    """Return 'folder' | 'ad1' | 'ova' | 'disk' | 'pcap' | 'unknown'."""
     path = Path(path)
+    if path.is_dir():
+        return "folder"
     if not path.is_file():
         raise FileNotFoundError(f"not found: {path}")
     from tforensic.pcap_analysis import is_pcap_file
@@ -326,6 +334,8 @@ def open_evidence(
     kind = classify_evidence(image_path)
     if kind == "pcap":
         return open_pcap_case(image_path)
+    if kind == "folder":
+        return open_case(image_path)
     if kind == "ad1":
         case = open_case(image_path)
         case.kind = "ad1"  # type: ignore[attr-defined]
@@ -377,5 +387,5 @@ def open_evidence(
         )
     raise RuntimeError(
         f"unsupported evidence format: {image_path} "
-        f"(expected AD1, OVA, xmount disk image, or network PCAP/PCAPNG)"
+        f"(expected AD1, OVA, xmount disk image, network PCAP/PCAPNG, or a folder)"
     )

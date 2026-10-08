@@ -116,7 +116,10 @@ export PATH="$PWD/scripts:$PATH"
 tforensic deps
 tforensic open /path/to/evidence.ad1
 tforensic serve /path/to/disk.dd --port 8000
+tforensic serve /path/to/phone_extraction/ --port 8000   # a folder works too
 ```
+
+**Folders** (phone file-system extractions, logical copies, unpacked dumps) open like an image: same tree, preview, hex, hashes, export and case ingest. In the desktop app use **Open folder…** (Ctrl+Shift+O).
 
 The web UI shows a **continuous missing-tools banner** (`/api/deps`) until optional system packages are installed.
 
@@ -158,6 +161,7 @@ tests/              unit tests
 ## Evidence safety
 
 - Source `.ad1` is opened read-only (`mmap` ACCESS_READ)
+- Evidence folders are only read, never written. Directory symlinks are not followed, and files are opened with `O_NOATIME` where the kernel allows it. The folder's fingerprint is a SHA-256 over its listing (path, type, size, mtime), and Case → Verify re-checks it. For strict work, mount the extraction read-only first.
 - Exports go to `<session>/export/` (or `-o` path you choose)
 - `tforensic close` deletes the session temp (use `--keep-export` to retain exports)
 

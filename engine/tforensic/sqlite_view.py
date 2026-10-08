@@ -35,15 +35,45 @@ def _cache_key(evidence_path: str, size: int, digest: str) -> str:
     return hashlib.sha1(f"{evidence_path}|{size}|{digest}".encode()).hexdigest()
 
 
+def _merge_wal(dest: Path, wal: bytes) -> bool:
+    """Replay a -wal sidecar into our private cache copy (never the evidence)."""
+    wal_path = Path(f"{dest}-wal")
+    wal_path.write_bytes(wal)
+    try:
+        con = sqlite3.connect(str(dest), timeout=10)
+        try:
+            con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            con.execute("PRAGMA journal_mode=DELETE")
+        finally:
+            con.close()
+        return True
+    except sqlite3.Error:
+        return False
+    finally:
+        for side in (wal_path, Path(f"{dest}-shm")):
+            try:
+                side.unlink()
+            except OSError:
+                pass
+
+
 def materialize_sqlite(
     evidence_path: str,
     data: bytes,
     cache_dir: Optional[str] = None,
+    wal: Optional[bytes] = None,
 ) -> dict[str, Any]:
-    """Write evidence DB bytes to a RO cache file. Returns {path, size, truncated, key}."""
+    """
+    Write evidence DB bytes to a cache file, replaying the -wal sidecar when given.
+    Apps like Discord keep nearly all rows in the WAL; without it the DB looks empty.
+    Returns {path, size, truncated, key, wal_merged}.
+    """
     truncated = len(data) > MAX_SQLITE_BYTES
     blob = data[:MAX_SQLITE_BYTES]
-    digest = hashlib.sha256(blob[:65536]).hexdigest()[:16]
+    h = hashlib.sha256(blob[:65536])
+    if wal:
+        h.update(hashlib.sha256(wal).digest())
+    digest = h.hexdigest()[:16]
     key = _cache_key(evidence_path, len(blob), digest)
     if key in _cache and os.path.isfile(_cache[key]):
         return {
@@ -52,12 +82,13 @@ def materialize_sqlite(
             "size": len(blob),
             "truncated": truncated,
             "cached": True,
+            "wal_merged": bool(wal),
         }
     root = Path(cache_dir) if cache_dir else Path(tempfile.gettempdir()) / "tforensic-sqlite"
     root.mkdir(parents=True, exist_ok=True)
     dest = root / f"{key}.sqlite"
-    if not dest.is_file() or dest.stat().st_size != len(blob):
-        dest.write_bytes(blob)
+    dest.write_bytes(blob)
+    merged = _merge_wal(dest, wal) if wal else False
     _cache[key] = str(dest)
     return {
         "key": key,
@@ -65,6 +96,7 @@ def materialize_sqlite(
         "size": len(blob),
         "truncated": truncated,
         "cached": False,
+        "wal_merged": merged,
     }
 
 
@@ -200,10 +232,27 @@ def _format_time_value(col: str, value: Any) -> Optional[str]:
     return f"{human}  |  {kind}:{n}"
 
 
+def _blob_text(value: bytes) -> Optional[str]:
+    """UTF-8 text stored as BLOB (JSON messages, keys) -> readable string."""
+    try:
+        text = value.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if not text:
+        return None
+    bad = sum(1 for ch in text if ord(ch) < 32 and ch not in "\t\n\r")
+    if bad > max(2, len(text) // 20):
+        return None
+    return "".join(ch if ord(ch) >= 32 or ch in "\t\n\r" else "·" for ch in text)
+
+
 def _cell_display(col: str, value: Any) -> Any:
     if value is None:
         return None
     if isinstance(value, bytes):
+        text = _blob_text(value)
+        if text is not None:
+            return text
         preview = value[:48].hex()
         return f"BLOB({len(value)}) {preview}{'…' if len(value) > 48 else ''}"
     human = _format_time_value(col, value)
@@ -320,7 +369,12 @@ def table_search(
         con.close()
 
 
-def browse_summary(db_path: str, size: int = 0, truncated: bool = False) -> dict[str, Any]:
+def browse_summary(
+    db_path: str,
+    size: int = 0,
+    truncated: bool = False,
+    wal_merged: bool = False,
+) -> dict[str, Any]:
     """First-open payload: tables + first table sample (Autopsy-like overview)."""
     tables = list_tables(db_path)
     sample = None
@@ -329,12 +383,13 @@ def browse_summary(db_path: str, size: int = 0, truncated: bool = False) -> dict
     if tables:
         names = {t["name"]: t for t in tables}
         # Chrome History / browser DBs: prefer urls for email/IOC hunts
-        for prefer in ("urls", "downloads", "visits"):
-            if prefer in names:
+        for prefer in ("urls", "downloads", "visits", "messages0", "messages", "message"):
+            if prefer in names and names[prefer].get("row_count"):
                 active = prefer
                 break
         if not active:
-            active = tables[0]["name"]
+            filled = [t for t in tables if t.get("row_count")]
+            active = (filled or tables)[0]["name"]
         sample = table_rows(db_path, active, 0, 50)
         try:
             schema = table_schema(db_path, active)
@@ -355,6 +410,7 @@ def browse_summary(db_path: str, size: int = 0, truncated: bool = False) -> dict
         "rows": (sample or {}).get("rows"),
         "schema": schema,
         "note": f"{len(tables)} tables/views"
+        + (" · -wal merged (rows not yet checkpointed are included)" if wal_merged else "")
         + (" · DB truncated for preview" if truncated else ""),
         "browser": True,
     }

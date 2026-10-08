@@ -57,7 +57,13 @@ def hash_file(path: str | Path, algo: str = "sha256", chunk: int = 1 << 20) -> s
 
 def create_session(image_path: str | Path, sessions_root: Optional[Path] = None) -> SessionMeta:
     image_path = Path(image_path).resolve()
-    if not image_path.is_file():
+    if image_path.is_dir():
+        from tforensic.folder_image import folder_manifest
+
+        digest, size, _ = folder_manifest(image_path)
+    elif image_path.is_file():
+        digest, size = hash_file(image_path), image_path.stat().st_size
+    else:
         raise FileNotFoundError(f"image not found: {image_path}")
 
     root = sessions_root or default_sessions_root()
@@ -72,8 +78,8 @@ def create_session(image_path: str | Path, sessions_root: Optional[Path] = None)
     meta = SessionMeta(
         id=sid,
         image_path=str(image_path),
-        image_sha256=hash_file(image_path),
-        image_size=image_path.stat().st_size,
+        image_sha256=digest,
+        image_size=size,
         temp_dir=str(temp_dir),
         export_dir=str(export_dir),
     )

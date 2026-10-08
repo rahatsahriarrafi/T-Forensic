@@ -17,7 +17,7 @@ def verify_evidence(db: CaseDB, evidence_id: str) -> dict:
     """Re-hash evidence file and compare to recorded sha256."""
     ev = db.get_evidence(evidence_id)
     path = Path(ev["path"])
-    if not path.is_file():
+    if not path.exists():
         result = {
             "ok": False,
             "evidence_id": evidence_id,
@@ -26,7 +26,12 @@ def verify_evidence(db: CaseDB, evidence_id: str) -> dict:
         }
         db.log_custody("verify_fail", json.dumps(result))
         return result
-    digest = hash_file(path)
+    if path.is_dir():
+        from tforensic.folder_image import folder_manifest
+
+        digest, size, _ = folder_manifest(path)
+    else:
+        digest, size = hash_file(path), path.stat().st_size
     expected = (ev.get("sha256") or "").lower()
     ok = digest.lower() == expected if expected else True
     result = {
@@ -35,7 +40,7 @@ def verify_evidence(db: CaseDB, evidence_id: str) -> dict:
         "path": str(path),
         "recorded_sha256": expected,
         "current_sha256": digest,
-        "size": path.stat().st_size,
+        "size": size,
         "verified_at": time.time(),
     }
     db.log_custody(

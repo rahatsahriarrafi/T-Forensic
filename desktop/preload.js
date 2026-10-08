@@ -33,6 +33,7 @@ function copyFromTerm() {
 
 contextBridge.exposeInMainWorld("tforensic", {
   pickAndOpen: () => ipcRenderer.invoke("pick-and-open"),
+  pickAndOpenFolder: () => ipcRenderer.invoke("pick-and-open-folder"),
   getState: () => ipcRenderer.invoke("get-state"),
   openExternal: (url) => ipcRenderer.invoke("open-external", url),
   onCaseOpened: (cb) => ipcRenderer.on("case-opened", (_e, data) => cb(data)),

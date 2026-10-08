@@ -254,12 +254,18 @@ class CaseDB:
         from tforensic.evidence import classify_evidence
 
         path = Path(path).resolve()
-        if not path.is_file():
+        if not path.exists():
             raise FileNotFoundError(f"evidence not found: {path}")
         eid = uuid.uuid4().hex[:12]
         kind = kind or classify_evidence(path)
-        digest = sha256 or hash_file(path)
-        size = path.stat().st_size
+        if path.is_dir():
+            from tforensic.folder_image import folder_manifest
+
+            manifest, size, _ = folder_manifest(path)
+            digest = sha256 or manifest
+        else:
+            digest = sha256 or hash_file(path)
+            size = path.stat().st_size
         ename = name or path.name
         # register symlink for bookkeeping
         link_dir = self.case_dir / "evidence"

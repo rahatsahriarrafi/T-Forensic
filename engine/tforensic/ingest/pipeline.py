@@ -166,7 +166,7 @@ def run_file_index(db: CaseDB, evidence_id: str, progress_cb: ProgressCB) -> dic
     est = estimate_open(evidence["path"])
     progress_cb(0.02, f"Estimate {est['human']}", est["seconds"])
 
-    if kind == "ad1":
+    if kind in ("ad1", "folder"):
         stats = _index_ad1(db, evidence, progress_cb)
     elif kind in ("disk", "ova"):
         stats = _index_disk(db, evidence, progress_cb)

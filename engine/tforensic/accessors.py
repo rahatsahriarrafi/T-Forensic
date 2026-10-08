@@ -533,12 +533,17 @@ def _archive_result(path: str, data: bytes) -> AccessorResult:
     )
 
 
-def _sqlite_result(path: str, data: bytes) -> AccessorResult:
+def _sqlite_result(path: str, data: bytes, wal: Optional[bytes] = None) -> AccessorResult:
     from tforensic.sqlite_view import browse_summary, materialize_sqlite
 
     try:
-        mat = materialize_sqlite(path, data)
-        summary = browse_summary(mat["path"], size=len(data), truncated=mat["truncated"])
+        mat = materialize_sqlite(path, data, wal=wal)
+        summary = browse_summary(
+            mat["path"],
+            size=len(data),
+            truncated=mat["truncated"],
+            wal_merged=mat.get("wal_merged", False),
+        )
         return AccessorResult(
             accessor="sqlite",
             label="SQLite",
@@ -839,6 +844,7 @@ def open_with_accessor(
     force: Optional[str] = None,
     *,
     system_data: Optional[bytes] = None,
+    wal_data: Optional[bytes] = None,
     offset: int = 0,
     length: Optional[int] = None,
 ) -> AccessorResult:
@@ -852,7 +858,7 @@ def open_with_accessor(
     if acc == "archive":
         return _archive_result(path, data)
     if acc == "sqlite":
-        return _sqlite_result(path, data)
+        return _sqlite_result(path, data, wal=wal_data)
     if acc == "recycle":
         return _recycle_result(path, data)
     if acc == "prefetch":

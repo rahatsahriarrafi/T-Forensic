@@ -85,7 +85,7 @@ class Case:
 
     def info(self) -> dict:
         return {
-            "kind": "ad1",
+            "kind": getattr(self, "kind", "ad1"),
             "session_id": self.meta.id,
             "image": Path(self.meta.image_path).name,
             "image_path": self.meta.image_path,
@@ -99,16 +99,22 @@ class Case:
         }
 
 
+def _case_for(meta: SessionMeta) -> Case:
+    if Path(meta.image_path).is_dir():
+        from tforensic.folder_image import FolderImage
+
+        case = Case(meta, FolderImage(meta.image_path))
+        case.kind = "folder"  # type: ignore[attr-defined]
+        return case
+    return Case(meta, AD1(meta.image_path))
+
+
 def open_case(image_path: str) -> Case:
-    meta = create_session(image_path)
-    img = AD1(meta.image_path)
-    return Case(meta, img)
+    return _case_for(create_session(image_path))
 
 
 def load_case(session_id: Optional[str] = None) -> Case:
-    meta = resolve_session(session_id)
-    img = AD1(meta.image_path)
-    return Case(meta, img)
+    return _case_for(resolve_session(session_id))
 
 
 def tree_dict(node: Node) -> dict:
