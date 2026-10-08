@@ -903,15 +903,12 @@ class Handler(BaseHTTPRequestHandler):
         extra = {}
         if not node.is_dir or (node.chunk_desc_rel and node.size):
             try:
-                digest = hashes(CASE.read(node.path))["sha256"]
-                rows.insert(0, {
-                    "key": "sha256",
-                    "label": "SHA-256 (computed)",
-                    "raw": digest,
-                    "display": digest,
-                    "kind": "hash",
-                })
-                extra["sha256"] = digest
+                h = hashes(CASE.read(node.path))
+                rows[0:0] = [
+                    {"key": k, "label": f"{label} (computed)", "raw": h[k], "display": h[k], "kind": "hash"}
+                    for k, label in (("sha256", "SHA-256"), ("md5", "MD5"))
+                ]
+                extra["sha256"], extra["md5"] = h["sha256"], h["md5"]
             except Exception:
                 pass
         name = (node.name or "").upper()
