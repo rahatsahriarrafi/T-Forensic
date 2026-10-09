@@ -410,15 +410,41 @@ main { flex: 1; display: flex; min-height: 0; }
 
 /* ---- Sidebar as dashboard nav ---- */
 #sidebar {
-  width: 440px;
-  min-width: 300px;
-  max-width: 62%;
-  border-right: 1px solid var(--border);
+  width: var(--side-w, 440px);
+  flex: 0 0 auto;
+  min-width: 220px;
   display: flex;
   flex-direction: column;
-  resize: horizontal;
   overflow: hidden;
   background: var(--bg-panel);
+}
+#pane-split {
+  flex: 0 0 7px;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+  position: relative;
+  background: transparent;
+}
+#pane-split::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--border);
+}
+#pane-split:hover::after,
+#pane-split.dragging::after {
+  left: 2px;
+  width: 3px;
+  background: var(--accent);
+}
+body.pane-dragging,
+body.pane-dragging * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .tabs, .detail-tabs {

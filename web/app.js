@@ -2967,3 +2967,53 @@ $("#pcap-close")?.addEventListener("click", async () => {
   $("#pcap-meta").innerHTML = `<pre class="muted">Capture closed.</pre>`;
   toast({ title: "PCAP closed", message: "", kind: "ok" });
 });
+
+(function initPaneSplit() {
+  const side = document.getElementById("sidebar");
+  const bar = document.getElementById("pane-split");
+  const main = document.querySelector("main");
+  if (!side || !bar || !main) return;
+  const KEY = "tff-side-w";
+  const MIN = 220;
+  const DETAIL_MIN = 280;
+  function clamp(w) {
+    const max = Math.max(MIN, main.getBoundingClientRect().width - DETAIL_MIN);
+    return Math.min(max, Math.max(MIN, w));
+  }
+  try {
+    const saved = parseInt(localStorage.getItem(KEY) || "", 10);
+    if (saved > 0) side.style.width = clamp(saved) + "px";
+  } catch (_) {}
+  let drag = false;
+  let startX = 0;
+  let startW = 0;
+  bar.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    drag = true;
+    startX = e.clientX;
+    startW = side.getBoundingClientRect().width;
+    bar.classList.add("dragging");
+    document.body.classList.add("pane-dragging");
+    try { bar.setPointerCapture(e.pointerId); } catch (_) {}
+    e.preventDefault();
+  });
+  bar.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    side.style.width = clamp(startW + (e.clientX - startX)) + "px";
+  });
+  function endDrag() {
+    if (!drag) return;
+    drag = false;
+    bar.classList.remove("dragging");
+    document.body.classList.remove("pane-dragging");
+    try {
+      localStorage.setItem(KEY, String(Math.round(side.getBoundingClientRect().width)));
+    } catch (_) {}
+  }
+  bar.addEventListener("pointerup", endDrag);
+  bar.addEventListener("pointercancel", endDrag);
+  bar.addEventListener("dblclick", () => {
+    side.style.width = "";
+    try { localStorage.removeItem(KEY); } catch (_) {}
+  });
+})();
