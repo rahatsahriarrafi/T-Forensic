@@ -48,25 +48,28 @@ function clearWorkStatus() {
   if (el) el.hidden = true;
   document.body.classList.remove("is-working");
 }
+let _cancelFn = null;
 function beginWork(label, opts) {
   _workDepth++;
   setWorkStatus(label || "Loading…");
+  if (opts && typeof opts.onCancel === "function") _cancelFn = opts.onCancel;
   const delay = opts && opts.overlayDelay != null ? opts.overlayDelay : 220;
   const forceOverlay = opts && opts.overlay === true;
+  const open = () => showBusy(
+    opts?.title || label || "Working…",
+    opts?.message || "Please wait…",
+    opts?.hint || "Large files can take a while. You can stop this.",
+    opts?.etaSeconds,
+    opts?.progress
+  );
   if (forceOverlay) {
-    showBusy(opts.title || label || "Working…", opts.message || "Please wait…", opts.hint || "");
+    open();
     return;
   }
   if (_workDepth === 1 && delay >= 0) {
     clearTimeout(_busyDelayTimer);
     _busyDelayTimer = setTimeout(() => {
-      if (_workDepth > 0) {
-        showBusy(
-          opts?.title || label || "Working…",
-          opts?.message || "Still loading — please wait.",
-          opts?.hint || "Large images and packet files can take a few seconds."
-        );
-      }
+      if (_workDepth > 0) open();
     }, delay);
   }
 }
@@ -75,9 +78,15 @@ function endWork() {
   if (_workDepth === 0) {
     clearTimeout(_busyDelayTimer);
     _busyDelayTimer = null;
+    _cancelFn = null;
     hideBusy();
     clearWorkStatus();
   }
+}
+function stopBusyLoad() {
+  const fn = _cancelFn;
+  if (fn) fn();
+  else hideBusy();
 }
 async function withBusy(label, fn, opts) {
   beginWork(label, opts || {});
@@ -102,6 +111,17 @@ let _etaStart = 0;
 let _etaTotal = 0;
 let _loadProgress = 0;
 let _loadStarted = 0;
+function estimateFileSeconds(size) {
+  const n = Number(size) || 0;
+  if (n <= 0) return 4;
+  // Local evidence read is often slower than disk speed (AD1 inflate, SQLite, ffmpeg).
+  return Math.max(2, Math.min(600, Math.round(n / (8 * 1024 * 1024) + 2)));
+}
+function selectedFileSize() {
+  const row = document.querySelector(".node.sel");
+  const n = row ? parseInt(row.dataset.size || "", 10) : NaN;
+  return Number.isFinite(n) ? n : 0;
+}
 function fmtEta(seconds) {
   const s = Math.max(0, Math.round(Number(seconds) || 0));
   if (s < 60) return `~${s}s`;
@@ -161,11 +181,11 @@ function tickBusyEta() {
   const elapsed = (Date.now() - _etaStart) / 1000;
   const left = Math.max(0, _etaTotal - elapsed);
   if (left <= 0 && elapsed > _etaTotal) {
-    main.textContent = "Taking longer than estimated…";
-    if (sub) sub.textContent = `Elapsed ${fmtEta(elapsed).replace(/^~/, "")} · watch % loaded`;
+    main.textContent = "Longer than the estimate";
+    if (sub) sub.textContent = `Elapsed ${fmtEta(elapsed).replace(/^~/, "")}. Use × to stop.`;
   } else {
-    main.textContent = `Rough ETA ${fmtEta(left)} (may be wrong)`;
-    if (sub) sub.textContent = `Elapsed ${fmtEta(elapsed).replace(/^~/, "")} · prefer % loaded`;
+    main.textContent = `About ${fmtEta(left)} left`;
+    if (sub) sub.textContent = `Elapsed ${fmtEta(elapsed).replace(/^~/, "")}`;
   }
   if (box) box.hidden = false;
 }
@@ -316,6 +336,7 @@ function makeNode(node) {
   const row = document.createElement("div");
   row.className = "node " + (node.is_dir ? "dir" : "file");
   row.dataset.path = node.path;
+  if (node.size != null) row.dataset.size = String(node.size);
   const tw = node.is_dir ? "▸" : " ";
   row.innerHTML = `<span class="tw">${tw}</span><span class="lbl"></span>` +
     (node.is_dir ? "" : `<span class="sz">${fmtSize(node.size || 0)}</span>`);
@@ -842,6 +863,15 @@ async function selectFile(path, rowEl) {
   await renderView("text");
 }
 
+let _fileAbort = null;
+function isAbort(e) {
+  return !!(e && (e.name === "AbortError" || /aborted/i.test(String(e.message || ""))));
+}
+function startFileLoad() {
+  if (_fileAbort) _fileAbort.abort();
+  _fileAbort = new AbortController();
+  return _fileAbort;
+}
 async function renderView(view) {
   curView = view;
   document.querySelectorAll(".dtab[data-view]").forEach((b) =>
@@ -853,18 +883,22 @@ async function renderView(view) {
   updateNavChrome();
   const body = $("#detail-body");
   const label = view === "hex" ? "Hex view" : view === "meta" ? "Metadata" : view === "hash" ? "Hashes" : "Preview";
+  const ac = startFileLoad();
+  const bytes = selectedFileSize();
   body.innerHTML = loadingHtml(label + "…", selPath);
   beginWork(`${label}…`, {
     title: label,
     message: selPath,
-    hint: "Reading file from the evidence image.",
+    hint: "Reading file from the evidence image. Use × to stop.",
     overlayDelay: 200,
+    etaSeconds: estimateFileSeconds(bytes),
+    onCancel: () => ac.abort(),
   });
   try {
     const pe = encodeURIComponent(selPath);
     if (view === "text" || view === "hex") {
       const mode = view === "hex" ? "hex" : "auto";
-      const d = await api(`/api/file?path=${pe}&mode=${mode}`);
+      const d = await api(`/api/file?path=${pe}&mode=${mode}`, { signal: ac.signal });
       if (d.error) {
         body.innerHTML = errHtml(d);
         notifyError(d);
@@ -874,7 +908,7 @@ async function renderView(view) {
       return;
     }
     if (view === "meta") {
-      const d = await api(`/api/meta?path=${pe}`);
+      const d = await api(`/api/meta?path=${pe}`, { signal: ac.signal });
       if (d.error) {
         body.innerHTML = errHtml(d);
         notifyError(d);
@@ -884,7 +918,7 @@ async function renderView(view) {
       return;
     }
     if (view === "hash") {
-      const d = await api(`/api/hash?path=${pe}`);
+      const d = await api(`/api/hash?path=${pe}`, { signal: ac.signal });
       if (d.error) {
         body.innerHTML = errHtml(d);
         notifyError(d);
@@ -896,8 +930,13 @@ async function renderView(view) {
         `<pre>MD5     ${d.md5}\nSHA-1   ${d.sha1}\nSHA-256 ${d.sha256}\nSize    ${d.size} (${fmtSize(d.size)})</pre>`;
     }
   } catch (e) {
+    if (isAbort(e)) {
+      if (_fileAbort === ac) body.innerHTML = `<pre class="muted">Stopped.</pre>`;
+      return;
+    }
     body.innerHTML = errHtml({ error: String(e.message || e), title: "Load failed" });
   } finally {
+    if (_fileAbort === ac) _fileAbort = null;
     endWork();
   }
 }
@@ -1584,17 +1623,20 @@ async function loadHexOffset(offset, bytes) {
   if (!selPath) return;
   const body = $("#detail-body");
   if (!body) return;
+  const ac = startFileLoad();
   const pe = encodeURIComponent(selPath);
   let url = `/api/file?path=${pe}&mode=hex&offset=${offset || 0}`;
   if (bytes) url += `&bytes=${bytes}`;
   beginWork("Loading hex…", {
     title: "Hex",
     message: selPath,
-    hint: `offset ${offset || 0}`,
+    hint: `offset ${offset || 0}. Use × to stop.`,
     overlayDelay: 120,
+    etaSeconds: estimateFileSeconds(bytes || selectedFileSize()),
+    onCancel: () => ac.abort(),
   });
   try {
-    const d = await api(url);
+    const d = await api(url, { signal: ac.signal });
     if (d.error) {
       body.innerHTML = errHtml(d);
       notifyError(d);
@@ -1605,8 +1647,13 @@ async function loadHexOffset(offset, bytes) {
       b.classList.toggle("active", b.dataset.view === "hex"));
     renderAccessor(d, body);
   } catch (e) {
+    if (isAbort(e)) {
+      if (_fileAbort === ac) body.innerHTML = `<pre class="muted">Stopped.</pre>`;
+      return;
+    }
     body.innerHTML = errHtml({ error: String(e.message || e), title: "Hex load failed" });
   } finally {
+    if (_fileAbort === ac) _fileAbort = null;
     endWork();
   }
 }
@@ -2961,6 +3008,7 @@ $("#pcap-stats")?.addEventListener("click", async () => {
     hideBusy();
   }
 });
+$("#busy-stop")?.addEventListener("click", () => stopBusyLoad());
 $("#pcap-close")?.addEventListener("click", async () => {
   await api("/api/pcap/close", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   $("#pcap-packets").innerHTML = "";

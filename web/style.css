@@ -1048,6 +1048,7 @@ footer .gh {
 }
 #busy.show { display: grid; }
 .busy-card {
+  position: relative;
   max-width: 26rem;
   width: 100%;
   background: var(--bg-card);
@@ -1056,6 +1057,20 @@ footer .gh {
   padding: 1.2rem 1.35rem;
   box-shadow: var(--shadow);
 }
+.busy-stop {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text);
+  font: 700 18px/1 var(--font-ui);
+  cursor: pointer;
+}
+.busy-stop:hover { color: var(--danger); border-color: var(--danger); }
 .busy-spin {
   width: 28px; height: 28px;
   border: 3px solid var(--border);
