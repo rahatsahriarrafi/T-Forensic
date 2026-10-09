@@ -550,6 +550,34 @@ ul.tree.root { padding-left: 8px; }
   font-size: 12.5px;
   line-height: 1.55;
 }
+#detail-body pre.lined {
+  --ln-digits: 3;
+  white-space: pre;
+  word-break: normal;
+  counter-reset: ln;
+}
+#detail-body pre.lined .ln {
+  display: block;
+  position: relative;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding-left: calc(var(--ln-digits) * 1ch + 1.5em);
+  min-height: 1.55em;
+}
+#detail-body pre.lined .ln::before {
+  counter-increment: ln;
+  content: counter(ln);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(var(--ln-digits) * 1ch);
+  padding-right: 0.75em;
+  border-right: 1px solid var(--border-soft);
+  text-align: right;
+  color: var(--muted);
+  user-select: none;
+  pointer-events: none;
+}
 .hex { white-space: pre !important; color: #9eb0c8; }
 .muted { color: var(--muted); }
 .badge {

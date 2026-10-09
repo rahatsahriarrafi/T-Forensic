@@ -1441,6 +1441,20 @@ function renderSqliteBrowser(d, body) {
   }
 }
 
+function linedPre(text) {
+  const pre = document.createElement("pre");
+  pre.className = "lined";
+  const lines = String(text ?? "").split("\n");
+  const digits = Math.max(2, String(lines.length).length);
+  pre.style.setProperty("--ln-digits", String(digits));
+  const html = new Array(lines.length);
+  for (let i = 0; i < lines.length; i++) {
+    html[i] = `<span class="ln">${escapeHtml(lines[i])}</span>`;
+  }
+  pre.innerHTML = html.join("");
+  return pre;
+}
+
 function renderAccessor(d, body) {
   const bits = [];
   if (d.label) bits.push(`accessor: ${d.label}`);
@@ -1576,13 +1590,24 @@ function renderAccessor(d, body) {
     return;
   }
 
-  const pre = document.createElement("pre");
-  if (d.mode === "hex") pre.className = "hex";
   const trunc = d.truncated && d.mode !== "hex"
-    ? `\n\n… [showing partial text; ${fmtSize(d.size)} total - use Hex tab or Download for the rest]`
+    ? `… [showing partial text; ${fmtSize(d.size)} total - use Hex tab or Download for the rest]`
     : "";
-  pre.textContent = (d.text || "") + trunc;
-  body.appendChild(pre);
+  if (d.mode === "hex") {
+    const pre = document.createElement("pre");
+    pre.className = "hex";
+    pre.textContent = d.text || "";
+    body.appendChild(pre);
+  } else {
+    body.appendChild(linedPre(d.text || ""));
+    if (trunc) {
+      const note = document.createElement("div");
+      note.className = "muted";
+      note.style.marginTop = "10px";
+      note.textContent = trunc;
+      body.appendChild(note);
+    }
+  }
 
   // Hex paging — walk the entire file (forensic: every byte is in reach)
   if (d.mode === "hex" && d.size > 0) {
